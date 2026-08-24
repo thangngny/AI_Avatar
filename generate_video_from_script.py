@@ -126,7 +126,7 @@ def _maybe_wrap_dataparallel(unet, model_dtype):
     stays on the primary device (its output is small and decode is cheap
     relative to the UNet). Disabled when OFFLINE_USE_MULTI_GPU=false or only one
     GPU is visible. Returns (unet, used_multi_gpu)."""
-    use_multi = env_flag("OFFLINE_USE_MULTI_GPU") if "OFFLINE_USE_MULTI_GPU" in os.environ else True
+    use_multi = os.getenv("OFFLINE_USE_MULTI_GPU", "true").strip().lower() not in ("0", "false", "no", "off")
     if not use_multi or torch.cuda.device_count() < 2:
         return unet, False
     device_ids = list(range(torch.cuda.device_count()))
