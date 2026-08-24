@@ -158,7 +158,7 @@ def _build_graph_runner(model, batch_size, model_dtype):
     return runner, ok
 
 
-def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False):
+def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0):
     vae, unet, pe, timesteps, audio_processor = model
     frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle = avatar_data
     wav_data, sr = sf.read(audio_path, dtype='float32')
@@ -169,9 +169,66 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     audio_len_sec = len(wav_data) / sr
     num_frames = int(audio_len_sec * fps)
     print(f'Audio duration: {audio_len_sec:.2f}s = {num_frames} frames @ {fps}fps')
+
+    # Strict feature-coverage validation (Stage 2, Phase 4/5).
+    # The old single-call audio2feat truncated any audio > 30 s to 1500 features
+    # and the renderer silently clamped out-of-range indices -> mouth froze past
+    # 30 s. This assertion makes under-coverage a loud, early failure instead of
+    # a silent render defect. Whisper features run at ~50 Hz; the last video
+    # frame maps to feature index ~num_frames*2, so we need at least that many
+    # features (plus the right-context window). Tolerance absorbs the ±1 rounding
+    # at chunk boundaries and the +100 ms apad silence tail.
+    FEATURE_HZ = 50.0
+    actual_feats = int(whisper_feature.shape[0])
+    # Need features up to the last frame's right-context edge:
+    # center = (num_frames-1)*2, right = center + (2+2+1)*2 = center+10.
+    required_feats = (num_frames - 1) * 2 + 10
+    coverage_sec = actual_feats / FEATURE_HZ
+    feat_tolerance = max(2, int(round(0.2 * FEATURE_HZ)))  # 200 ms tolerance
+    if actual_feats < required_feats - feat_tolerance:
+        raise RuntimeError(
+            "Whisper feature coverage error:\n"
+            f"  audio_duration   = {audio_len_sec:.3f}s\n"
+            f"  actual_features  = {actual_feats}\n"
+            f"  expected_features≈ {int(round(audio_len_sec * FEATURE_HZ))}\n"
+            f"  required_for_frames = {required_feats}\n"
+            f"  feature_coverage ≈ {coverage_sec:.3f}s\n"
+            "  The feature array does not cover the full audio. This is the "
+            "30-second truncation regression — audio2feat must chunk long audio."
+        )
+    print(f'Feature coverage OK: {actual_feats} features (~{coverage_sec:.2f}s) for '
+          f'{num_frames} frames (required ~{required_feats})')
+    # Stage 3 temporal offset: shift the audio-conditioning feature window in
+    # time WITHOUT changing its shape (context size unchanged). The center feature
+    # index for video frame i becomes (i + audio_feature_offset_frames) * (50/fps)
+    # instead of i * (50/fps). Sign convention:
+    #   +1 frame -> use audio features 40 ms LATER  (mouth anticipates / leads more)
+    #   -1 frame -> use audio features 40 ms EARLIER (mouth lags more / leads less)
+    # Default 0 = unchanged Stage 2 behavior. Does NOT touch the final audio track,
+    # WAV, ffmpeg mux, video duration, or Whisper feature generation.
+    if audio_feature_offset_frames:
+        print(f'Audio feature offset: {audio_feature_offset_frames} frames '
+              f'({audio_feature_offset_frames*1000/fps:+.0f} ms)  [center=(i+off)*{50/fps:.0f}]')
+    # Stage 4 audio context: how many of the 10 conditioning features sit BEFORE
+    # the aligned center. The offline path's get_sliced_feature uses a FUTURE-ONLY
+    # window [center, center+10) (left=0). Realtime/official-style uses a roughly
+    # symmetric [-4, +6) (left=4). audio_context_left shifts the 10-feature window
+    # earlier without changing its length (MuseTalk conditioning stays [50,384],
+    # pe/UNet shapes unchanged). Default 0 = unchanged Stage 3 behavior.
+    #   left=0  -> relative [ 0, +10)  (current offline, future-only)
+    #   left=4  -> relative [-4,  +6)  (realtime/official-style)
+    #   left=5  -> relative [-5,  +5)  (symmetric)
+    # NOTE: changing left shifts the window's effective center earlier, so the
+    # Stage 3 offset must be re-calibrated per context (left+1 -> center earlier by
+    # 20ms -> offset must increase ~0.5 frame to keep av_offset 0).
+    AUDIO_CONTEXT_TOTAL = 10  # features (MuseTalk conditioning = 10 * 5 = 50 rows)
+    if audio_context_left:
+        print(f'Audio context: left={audio_context_left} total={AUDIO_CONTEXT_TOTAL} '
+              f'window=[center-{audio_context_left}, center+{AUDIO_CONTEXT_TOTAL-audio_context_left})')
     h, w = frame_list_cycle[0].shape[:2]
     length = len(input_latent_list_cycle)
     model_dtype = _model_dtype(unet.model)
+    n_feat = whisper_feature.shape[0]  # total Whisper features (full coverage)
 
     # Multi-GPU DataParallel (offline) OR single-GPU CUDA graph — mutually exclusive.
     unet, used_multi_gpu = _maybe_wrap_dataparallel(unet, model_dtype)
@@ -193,10 +250,20 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
 
     print('Preparing audio features per frame...')
     all_whisper_chunks = []
+    feat_mult = 50 // fps  # 2 feature positions per video frame
     for i in tqdm(range(num_frames), desc='Feature chunks'):
-        chunks = audio_processor.feature2chunks(whisper_feature, fps=fps, batch_size=1,
-                                                audio_feat_length=[2,2], start=i)
-        all_whisper_chunks.append(chunks[0])
+        # Stage 3+4: aligned center in feature units, then a 10-feature window with
+        # `audio_context_left` features before it. Window SHAPE is always 10 features
+        # -> [50,384] (identical to get_sliced_feature's contract); only WHICH 10
+        # features (and thus the audio time window) changes. Out-of-range indices
+        # clamp to [0, n_feat-1] (natural start/end padding, same as get_sliced_feature).
+        center = (i + audio_feature_offset_frames) * feat_mult
+        start_f = center - audio_context_left
+        sel = np.stack([
+            whisper_feature[max(0, min(n_feat - 1, idx))]
+            for idx in range(start_f, start_f + AUDIO_CONTEXT_TOTAL)
+        ], axis=0)  # [10, 5, 384]
+        all_whisper_chunks.append(sel.reshape(-1, 384))  # [50, 384]
 
     # ffmpeg rawvideo -> libx264 ultrafast pipe (replaces cv2.VideoWriter mp4v).
     # mp4v is slow and soft; libx264 ultrafast is ~5x faster and sharper at CRF16.
@@ -289,6 +356,17 @@ def main():
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--split_by', choices=['line','sentence','all'], default='sentence')
     parser.add_argument('--face_enhance', action='store_true', help='Enable GFPGAN face restoration (needs models/GFPGANv1.4.pth)')
+    parser.add_argument('--audio-feature-offset-frames', type=int, default=0,
+                        help='Stage 3 temporal offset in VIDEO frames. +N = use audio '
+                             'features N*40ms LATER (mouth anticipates/leads more); '
+                             '-N = use audio N*40ms EARLIER (mouth lags more). '
+                             'Default 0 = unchanged. Does not touch the final audio track.')
+    parser.add_argument('--audio-context-left', type=int, default=0,
+                        help='Stage 4 audio context: number of the 10 conditioning '
+                             'features placed BEFORE the aligned center (0=future-only '
+                             '[0,+10) current offline; 4=realtime/official [-4,+6); '
+                             '5=symmetric [-5,+5)). Default 0 = unchanged Stage 3. '
+                             'Total stays 10 -> MuseTalk conditioning [50,384] unchanged.')
     args = parser.parse_args()
     if not os.path.exists(args.script):
         print(f'Script file not found: {args.script}'); sys.exit(1)
@@ -320,7 +398,9 @@ def main():
         print(f'Loading avatar: {args.avatar_id}')
         avatar_data = load_avatar_data(args.avatar_id)
         render_video(wav_path, avatar_data, model, args.output,
-                     fps=args.fps, batch_size=args.batch_size, face_enhance=args.face_enhance)
+                     fps=args.fps, batch_size=args.batch_size, face_enhance=args.face_enhance,
+                     audio_feature_offset_frames=args.audio_feature_offset_frames,
+                     audio_context_left=args.audio_context_left)
 
 if __name__ == '__main__':
     main()
