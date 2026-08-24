@@ -72,6 +72,14 @@ hiddenimports += [
     'streamout.webrtc', 'streamout.rtmp', 'streamout.virtualcam', 'streamout.base_output',
     # avatar creation chain (lazy in routes.py / genavatar)
     'avatars.musetalk.genavatar',
+    # musetalk model definitions — avatars/musetalk/models/ has NO __init__.py
+    # (namespace package), so PyInstaller does not auto-collect it. utils/utils.py
+    # imports `from avatars.musetalk.models.vae/.unet import ...`; with Pyarmor
+    # obfuscation the static analysis can't see it, so list explicitly.
+    'avatars.musetalk.models',
+    'avatars.musetalk.models.vae',
+    'avatars.musetalk.models.unet',
+    'avatars.musetalk.models.syncnet',
     'avatars.musetalk.utils.preprocessing',
     'avatars.musetalk.utils.blending',
     'avatars.musetalk.utils.utils',

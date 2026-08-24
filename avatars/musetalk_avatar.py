@@ -52,6 +52,7 @@ from utils.image import read_imgs, mirror_index
 from utils.device import initialize_device
 from utils.app_root import app_root
 from registry import register
+from utils.cuda_graph import GraphRunner
 
 device = initialize_device()
 logger.info('Using {} for inference.'.format(device))
@@ -245,6 +246,48 @@ class MuseReal(BaseAvatar):
         if self.gpu_unet_warmup_enabled:
             self.register_gpu_unet_warmup(self._unet_warmup_tick)
 
+        # CUDA Graph capture around pe+UNet for the fixed batch_size shape. The
+        # MuseTalk inference batch is shape-constant (latent bs×8×32×32, audio
+        # bs×50×384), so capturing the forward eliminates per-launch + cuDNN-algo
+        # setup overhead — the dominant win for small realtime batches (target:
+        # unet 0.18s -> ~0.10s). Disabled under multi-GPU DataParallel (scatter/
+        # gather is not graph-capturable) and gated by LIVETALKING_CUDA_GRAPH
+        # (default true). VAE decode stays eager (its .cpu().numpy() exit is not
+        # graph-capturable). Capture failure degrades to eager (GraphRunner logs
+        # + returns False), never raising into the inference loop.
+        self._graph_runner = None
+        self._graph_ok = False
+        self._cuda_graph_wanted = (
+            os.getenv("LIVETALKING_CUDA_GRAPH", "true").strip().lower()
+            not in ("0", "false", "no", "off")
+        )
+        runtime_multi_gpu = bool(getattr(opt, "runtime_multi_gpu", False))
+        if self._cuda_graph_wanted and not runtime_multi_gpu and torch.cuda.is_available():
+            self._build_inference_graph()
+
+    @torch.no_grad()
+    def _graph_forward(self, audio_feat, latent):
+        """pe + UNet forward, the subgraph we capture. audio_feat is the pre-PE
+        (bs,50,384) tensor; latent is (bs,8,32,32). Returns pred_latents on the
+        UNet device. timesteps are always zeros for MuseTalk."""
+        ts = _build_timesteps(latent.shape[0], self.unet.device)
+        audio_emb = self.pe(audio_feat)
+        return self.unet.model(latent, ts, encoder_hidden_states=audio_emb, return_dict=False)[0]
+
+    @torch.no_grad()
+    def _build_inference_graph(self):
+        """Capture a CUDA graph for the pe+UNet forward at self.batch_size."""
+        model_dtype = _model_dtype(self.unet.model)
+        static_audio = torch.zeros((self.batch_size, 50, 384), device=self.unet.device, dtype=model_dtype)
+        static_latent = torch.zeros((self.batch_size, 8, 32, 32), device=self.unet.device, dtype=model_dtype)
+        runner = GraphRunner(self.unet.device, self._graph_forward, warmup_iters=3)
+        ok = runner.capture(
+            {"audio_feat": static_audio, "latent": static_latent},
+            label=f"musetalk_unet_bs{self.batch_size}",
+        )
+        self._graph_runner = runner
+        self._graph_ok = ok
+
     @torch.no_grad()
     def _whisper_warmup_tick(self):
         """One Whisper encoder forward on a zero buffer, called by the GPU
@@ -343,21 +386,44 @@ class MuseReal(BaseAvatar):
         audio_feature_batch = torch.from_numpy(whisper_batch)
         audio_feature_batch = audio_feature_batch.to(device=self.unet.device,
                                                         dtype=model_dtype)
-        audio_feature_batch = self.pe(audio_feature_batch)
+        # NOTE: PE is NOT applied here. The graph path applies pe inside the
+        # captured subgraph (_graph_forward); the eager path applies it just
+        # before the UNet call below. Applying pe here would double-PE on the
+        # graph path.
         latent_batch = latent_batch.to(device=self.unet.device, dtype=model_dtype)
         audio_prep_sec = time.perf_counter() - stage_start
 
         local_timesteps = _build_timesteps(latent_batch.shape[0], self.unet.device)
         unet_start = time.perf_counter()
-        pred_latents = self.unet.model(latent_batch, 
-                                    local_timesteps, 
-                                    encoder_hidden_states=audio_feature_batch,
-                                    return_dict=False)[0]
-        if torch.cuda.is_available():
-            torch.cuda.synchronize(self.unet.device)
+        # Full-size batch on single-GPU -> replay the captured pe+UNet graph
+        # (no per-launch overhead). Partial tail batch or multi-GPU / no graph
+        # -> eager forward. Under the graph path the explicit cuda.synchronize
+        # is skipped: replay() submits async on the capture stream and the next
+        # op (vae.decode_latents does .to/.cpu) synchronizes implicitly, so the
+        # unet compute still completes before VAE starts. unet_sec under the
+        # graph measures submit time (small); the real cost shows up in
+        # inference_batch_sec and the infer-fps counter in base_avatar.inference.
+        if self._graph_ok and latent_batch.shape[0] == self.batch_size:
+            pred_latents = self._graph_runner.replay(
+                {"audio_feat": audio_feature_batch, "latent": latent_batch}
+            )
+        else:
+            audio_emb = self.pe(audio_feature_batch)
+            pred_latents = self.unet.model(latent_batch,
+                                        local_timesteps,
+                                        encoder_hidden_states=audio_emb,
+                                        return_dict=False)[0]
+            if torch.cuda.is_available():
+                torch.cuda.synchronize(self.unet.device)
         unet_sec = time.perf_counter() - unet_start
 
         vae_start = time.perf_counter()
+        # decode_latents internally does latents.to(device=self.vae.device, ...)
+        # (vae.py), so a split_workers setup where the UNet is on GPU0 and the
+        # VAE on GPU1 is handled by an explicit cross-device transfer inside
+        # decode_latents — no .to(vae.device) needed here. (Verified: the prior
+        # plan draft suspected a device mismatch, but decode_latents already
+        # moves the latents onto the VAE device before decoding.)
         pred = self.vae.decode_latents(pred_latents)
         if torch.cuda.is_available():
             vae_device = getattr(self.vae, "device", self.unet.device)

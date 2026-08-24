@@ -42,6 +42,7 @@ import registry
 from server.routes import setup_routes
 from server.rtc_manager import RTCManager
 from server.session_manager import session_manager
+from server.auth import auth_middleware
 
 import argparse
 import random
@@ -306,6 +307,11 @@ def main():
     from config import parse_args
     opt = parse_args()
     configure_gpu_runtime(opt)
+    # Validate + log the effective LIVETALKING_* tuning config once (typo
+    # detection for the ~40 env knobs, so a misspelled knob does not silently
+    # no-op). Pure read of os.environ; no side effects.
+    from utils.tuning import log_effective_config
+    log_effective_config(opt)
     if (
         opt.model == "musetalk"
         and getattr(opt, "runtime_multi_gpu", False)
@@ -368,25 +374,38 @@ def main():
         rendthrd.start()
 
     #############################################################################
-    appasync = web.Application(client_max_size=1024**2*100)
+    appasync = web.Application(client_max_size=1024**2*100, middlewares=[auth_middleware])
     appasync["opt"] = opt
     appasync["llm_response"] = llm_response
     appasync["llm_enqueue_response"] = enqueue_llm_response
 
     appasync.on_shutdown.append(on_shutdown)
     appasync.router.add_post("/offer", offer)
-    
-    # 注册 server/routes.py 中的通用 API 路由
-    setup_routes(appasync) 
 
-    # Configure default CORS settings.
-    cors = aiohttp_cors.setup(appasync, defaults={
-            "*": aiohttp_cors.ResourceOptions(
-                allow_credentials=True,
-                expose_headers="*",
-                allow_headers="*",
-            )
-        })
+    # 注册 server/routes.py 中的通用 API 路由
+    setup_routes(appasync)
+
+    # Configure CORS settings. The old default was "*" + allow_credentials=True,
+    # which is a CORS misconfiguration: browsers reject the combination, and a
+    # reflecting proxy effectively bypasses same-origin protection for an
+    # unauthenticated API. Use an explicit origin list from
+    # LIVETALKING_CORS_ORIGINS (comma-separated). Default to the local UI
+    # origins so the launcher dashboard works; set the env to the public origin(s)
+    # when deploying behind a reverse proxy.
+    cors_origins_raw = os.getenv(
+        "LIVETALKING_CORS_ORIGINS",
+        "http://127.0.0.1:8010,http://localhost:8010",
+    ).strip()
+    cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
+    cors_defaults = {
+        origin: aiohttp_cors.ResourceOptions(
+            allow_credentials=True,
+            expose_headers="*",
+            allow_headers="*",
+        )
+        for origin in cors_origins
+    }
+    cors = aiohttp_cors.setup(appasync, defaults=cors_defaults)
     # Configure CORS on all routes.
     for route in list(appasync.router.routes()):
         cors.add(route)

@@ -8,6 +8,13 @@ build/
 *.tmp
 *.tmp.*
 *.mp4
+
+# Local runtime/debug artifacts (not source)
+diagnostics/
+.launch_config.json
+launch_config.json
+record_config.json
+.restart_requested
 *.aac
 *.wav
 *.mp3

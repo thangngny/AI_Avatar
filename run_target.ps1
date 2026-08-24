@@ -1,4 +1,4 @@
-﻿# Supervisor for the frozen LiveTalkingServer.exe (Nuitka onedir) on the target
+﻿# Supervisor for the frozen LiveTalkingServer.exe (PyArmor + PyInstaller onedir) on the target
 # machine. Adapted from run_musetalk_avatar_3.ps1 but:
 #   - launches LiveTalkingServer.exe (bundled Python runtime, no Python needed)
 #   - sets NOBLE_RAG_DISABLED=1 (target does not run Noble_RAG)
@@ -24,7 +24,8 @@ if (Test-Path -LiteralPath $ffmpegDir) {
 }
 
 # --- Optional VC++ Redistributable install on first boot --------------------
-# Nuitka onedir links against the VC++ 2015-2022 runtime (vcruntime140.dll etc.).
+# PyInstaller onedir bundles a Python runtime that links against the VC++
+# 2015-2022 runtime (vcruntime140.dll etc.).
 # Most Windows machines already have it. If not, the exe fails to start with a
 # missing-dll dialog. Drop vc_redist.x64.exe into .\tools\ and this will install
 # it quietly (needs admin) when vcruntime140.dll is absent.
@@ -72,6 +73,10 @@ $env:NOBLE_RAG_DISABLED = "1"
 $env:LIVETALKING_MULTI_GPU = "false"
 $env:LIVETALKING_GPU_ID = "0"
 $env:LIVETALKING_GPU_IDS = "0"
+# CUDA Graph capture around the pe+UNet forward (fixed MuseTalk shape) cuts
+# per-launch overhead on any GPU. Falls back to eager if capture fails. Safe
+# for the customer GPU (no extra memory at batch_size 8). Disable with =false.
+$env:LIVETALKING_CUDA_GRAPH = "true"
 $env:LIVETALKING_WHISPER_DEVICE = ""
 $env:LIVETALKING_TTS_REALTIME_PACING = "true"
 $env:LIVETALKING_TTS_MAX_BUFFER_SEC = "2.0"

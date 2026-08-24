@@ -16,6 +16,10 @@ $env:NOBLE_RAG_DISABLED = "1"
 $env:LIVETALKING_MULTI_GPU = "false"
 $env:LIVETALKING_GPU_ID = "0"
 $env:LIVETALKING_GPU_IDS = "0"
+# CUDA Graph capture around the pe+UNet forward (fixed MuseTalk shape) cuts
+# per-launch overhead — the biggest realtime inference win on a single 3090.
+# Falls back to eager automatically if capture fails. Disable with =false.
+$env:LIVETALKING_CUDA_GRAPH = "true"
 $env:LIVETALKING_WHISPER_DEVICE = ""
 $env:LIVETALKING_TTS_REALTIME_PACING = "true"
 $env:LIVETALKING_TTS_MAX_BUFFER_SEC = "2.0"
@@ -126,7 +130,7 @@ $proc = Start-Process -FilePath $pyExe `
         "--tts","elevenlabs",
         "--REF_FILE","vi-VN-HoaiMyNeural",
         "--gpu_id","0",
-        "--batch_size","8",
+        "--batch_size","16",
         "--enable_telemetry","--telemetry_interval","0.5") `
     -WorkingDirectory $root -WindowStyle Hidden `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru

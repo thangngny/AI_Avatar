@@ -73,9 +73,19 @@ class SessionManager:
             with self._build_lock:
                 return self.build_session_fn(sessionid, params)
 
-        avatar_session = await asyncio.get_event_loop().run_in_executor(
-            None, _build
-        )
+        try:
+            avatar_session = await asyncio.get_event_loop().run_in_executor(
+                None, _build
+            )
+        except Exception:
+            # Build threw (avatar load fail, OOM, etc). The placeholder None set
+            # above MUST be removed or it leaks a session slot forever (get_session
+            # returns None, has_session is False, but the key stays → "reach max
+            # session" after enough failed builds). Pop + re-raise so the caller
+            # (rtc_manager.handle_offer) sees the failure and can clean up its PC.
+            self.sessions.pop(sessionid, None)
+            logger.exception("create_session build failed: sessionid=%s", sessionid)
+            raise
         self.sessions[sessionid] = avatar_session
         chat_history_store.register_session(str(sessionid), opt=avatar_session.opt, params=params)
         return sessionid

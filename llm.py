@@ -10,67 +10,18 @@ from urllib.error import HTTPError, URLError
 from urllib.request import ProxyHandler, Request, build_opener
 
 from utils.logger import logger
-from utils.app_root import app_root
+from utils.envconfig import env as _env, env_float as _env_float, env_int as _env_int
 
 if TYPE_CHECKING:
     from avatars.base_avatar import BaseAvatar
 
 DEFAULT_RAG_CHAT_URL = "http://127.0.0.1:8021/sales/query"
 DEFAULT_RAG_LIVETALKING_QUERY_URL = "http://127.0.0.1:8021/integrations/livetalking/query-stream"
-_ENV_LOADED = False
 _RAG_OPENER = build_opener(ProxyHandler({}))
 _LLM_QUEUE_MAXSIZE = 8
 _llm_job_queue: "queue.Queue[tuple[str, Any, dict[str, Any]]]" = queue.Queue(maxsize=_LLM_QUEUE_MAXSIZE)
 _llm_workers_started = False
 _llm_workers_lock = threading.Lock()
-
-
-def _load_env_file():
-    global _ENV_LOADED
-    if _ENV_LOADED:
-        return
-    _ENV_LOADED = True
-
-    env_path = app_root() / ".env"
-    if not env_path.exists():
-        return
-
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and (key not in os.environ or key.startswith(("NOBLE_RAG_", "AGENT_RAG_"))):
-            os.environ[key] = value
-
-
-def _env(name: str, default: str = "") -> str:
-    _load_env_file()
-    return os.getenv(name, default).strip()
-
-
-def _env_float(name: str, default: float) -> float:
-    value = _env(name)
-    if not value:
-        return default
-    try:
-        return float(value)
-    except ValueError:
-        logger.warning("Invalid %s=%s, using %.1f", name, value, default)
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    value = _env(name)
-    if not value:
-        return default
-    try:
-        return int(value)
-    except ValueError:
-        logger.warning("Invalid %s=%s, using %d", name, value, default)
-        return default
 
 
 def _resolve_rag_url() -> str:

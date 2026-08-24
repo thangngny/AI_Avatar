@@ -434,6 +434,7 @@ class BaseAvatar:
             "speaking": int(bool(self.speaking)),
             "current_speaking": int(bool(self._telemetry_metrics.get("current_speaking", False))),
             "last_infer_all_silence": int(bool(self._telemetry_metrics.get("last_infer_all_silence", False))),
+            "infer_failed": int(bool(self._telemetry_metrics.get("infer_failed", False))),
             "custom_audiotype": int(self.custom_audiotype),
             "tts_ingest_queue_size": self._safe_qsize(self.tts_ingest_queue),
             "tts_buffered_audio_sec": round(max(0, self._safe_qsize(self.tts_ingest_queue)) * self.tts_chunk_sec, 4),
@@ -996,7 +997,13 @@ class BaseAvatar:
             self._record_audio_pipe.wait()
         tmp_video = f"temp{self.opt.sessionid}.mp4"
         tmp_audio = f"temp{self.opt.sessionid}.aac"
-        out_path = "data/record.mp4"
+        # Per-session staging path: the old fixed `data/record.mp4` was a SINGLE
+        # shared file, so two sessions recording at once clobbered each other's
+        # muxed output (last-writer-wins → lost take). Per-session avoids the race
+        # without changing the record_save flow, which already reads
+        # last_recording_path (set below) and only falls back to the legacy
+        # data/record.mp4 for takes recorded before this change.
+        out_path = f"data/record_{self.opt.sessionid}.mp4"
         # Mux via subprocess so we can branch on success. Only delete the raw
         # temp files when the mux produced a non-empty output, so a FAILED mux
         # leaves the temps for recovery instead of losing the take. The temps
@@ -1140,6 +1147,15 @@ class BaseAvatar:
         # frames instead of killing this thread (which would freeze the avatar).
         self._infer_error = False
         self._infer_err_count = 0
+        # Alert threshold: after this many CONSECUTIVE failed batches, escalate
+        # from a one-time debug exception to a rate-limited logger.error so a
+        # persistently broken model surfaces in wrapper.log instead of silently
+        # leaving the avatar muted forever. Alert fires once per threshold
+        # interval (every N failures) to stay noisy-but-not-flooding.
+        self._infer_fail_alert_threshold = max(
+            1, int(os.getenv("LIVETALKING_INFER_FAIL_ALERT_THRESHOLD", "5"))
+        )
+        self._infer_fail_alerted_count = 0
 
         # syncnet_T = 12  # 时间步
         # weight_dtype = torch.float16  # 数据类型
@@ -1228,12 +1244,26 @@ class BaseAvatar:
                         logger.exception("inference_batch failed; falling back to silence frames:")
                     self._infer_error = True
                     self._infer_err_count += 1
+                    # Escalate to logger.error every N consecutive failures so a
+                    # permanently broken model is visible in logs (the per-batch
+                    # debug exception only prints the FIRST failure of a burst).
+                    if self._infer_err_count - self._infer_fail_alerted_count >= self._infer_fail_alert_threshold:
+                        self._infer_fail_alerted_count = self._infer_err_count
+                        logger.error(
+                            "inference_batch has failed %d consecutive batches — avatar is muted "
+                            "(silence fallback). Check model/weights/GPU; set "
+                            "LIVETALKING_INFER_FAIL_ALERT_THRESHOLD to tune.",
+                            self._infer_err_count,
+                        )
+                    self._set_telemetry_metric("infer_failed", True)
                     pred = None
                 else:
                     if self._infer_error:
                         logger.info("inference_batch recovered after %d failed batches", self._infer_err_count)
                     self._infer_error = False
                     self._infer_err_count = 0
+                    self._infer_fail_alerted_count = 0
+                    self._set_telemetry_metric("infer_failed", False)
                 self._set_telemetry_metric("inference_batch_sec", time.perf_counter() - t)
                 self._set_telemetry_metric("last_infer_all_silence", False)
                 # Mark that a real (UNet) inference batch just ran, so the

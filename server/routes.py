@@ -16,6 +16,7 @@ from aiohttp import web
 from utils.logger import logger
 from utils.app_root import app_root
 from server.chat_history import chat_history_store
+from server.auth import require_loopback
 
 
 # ─── 路由工具函数 ──────────────────────────────────────────────────────────
@@ -470,7 +471,12 @@ async def restart_server(request):
     flushed). The PowerShell supervisor sees the exit + flag and relaunches
     app.py with the new --model. The browser polls GET /server/info and reloads
     once the new server reports the requested model.
+
+    Loopback-only: a remote caller must not be able to kill the process (DoS).
     """
+    if not require_loopback(request):
+        return web.Response(status=403, content_type="application/json",
+                            text='{"code":-1,"msg":"loopback only"}')
     try:
         params = {}
         try:
@@ -881,7 +887,13 @@ async def recording_download(request):
 
 
 async def record_open_folder(request):
-    """Open the configured record folder in the OS file explorer (Windows)."""
+    """Open the configured record folder in the OS file explorer (Windows).
+
+    Loopback-only: spawning a desktop process from a remote request is both
+    useless and a local-command-execution vector."""
+    if not require_loopback(request):
+        return web.Response(status=403, content_type="application/json",
+                            text='{"code":-1,"msg":"loopback only"}')
     try:
         folder = _read_record_folder()
         if not os.path.isdir(folder):
@@ -901,7 +913,12 @@ async def elevenlabs_settings(request):
     POST /settings/elevenlabs {api_key?, voice_id?} -> persist to .env, push to
     os.environ + live TTS instances (no restart needed). Empty/missing fields
     are left unchanged. model_id is locked to eleven_v3 and never settable here.
+
+    Loopback-only: never let a remote caller read/change the API key.
     """
+    if not require_loopback(request):
+        return web.Response(status=403, content_type="application/json",
+                            text='{"code":-1,"msg":"loopback only"}')
     try:
         # Read the effective values the way the TTS does: env wins, then .env.
         from tts.elevenlabs import _env
