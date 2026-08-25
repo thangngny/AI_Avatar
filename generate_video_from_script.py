@@ -29,7 +29,7 @@ Bug fixed vs the previous version: `pred.cpu().numpy()` assumed decode_latents
 returned a tensor, but it returns a uint8 BGR numpy array -> AttributeError on
 every run. Now `pred` is used directly.
 """
-import argparse, os, sys, re, subprocess, tempfile
+import argparse, os, sys, re, subprocess, tempfile, json
 import cv2, numpy as np, torch, pickle, glob, soundfile as sf
 from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,8 +39,68 @@ from avatars.musetalk.whisper.audio2feature import Audio2Feature
 from utils.image import read_imgs, mirror_index
 from utils.device import initialize_device
 from utils.cuda_graph import GraphRunner
+from utils.avatar_validate import validate_avatar
 
 device = initialize_device()
+
+# ----------------------------------------------------------------------------
+# ONE PRODUCTION RENDER TRUTH
+# ----------------------------------------------------------------------------
+# The locked MuseTalk v1.5 quality/lip-sync config lives ONLY in
+# config/render_truth.json. gain / context / offset / fps / resolution /
+# CUDA Graph / WOLA / feature-coverage are NOT free per-job knobs in production
+# mode — they are forced from the truth. Only --experimental-config unlocks them
+# for research, and then the run is explicitly flagged as non-production.
+TRUTH_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "config", "render_truth.json")
+
+# Required keys + their python types. Missing/invalid -> fail closed.
+_TRUTH_SCHEMA = {
+    "pipeline": str,
+    "audio_gain": float,
+    "audio_context_left": int,
+    "audio_feature_offset_frames": int,
+    "fps": int,
+    "resolution_width": int,
+    "resolution_height": int,
+    "composite_max_dim": int,
+    "cuda_graph": bool,
+    "long_audio_wola": bool,
+    "feature_coverage_assertion": bool,
+}
+
+
+def load_render_truth(truth_path=TRUTH_PATH):
+    """Load + validate config/render_truth.json. Fail closed (exit 1) on any
+    problem — never silently fall back to a different quality config."""
+    if not os.path.exists(truth_path):
+        sys.exit(f"[render_truth] STOP: locked config not found: {truth_path}\n"
+                 "  This renderer requires config/render_truth.json. Do NOT run with "
+                 "improvised defaults.")
+    try:
+        with open(truth_path, "r", encoding="utf-8") as f:
+            truth = json.load(f)
+    except Exception as e:
+        sys.exit(f"[render_truth] STOP: config unreadable: {truth_path}: {e}")
+    if not isinstance(truth, dict):
+        sys.exit(f"[render_truth] STOP: config root is not an object: {truth_path}")
+    for k, typ in _TRUTH_SCHEMA.items():
+        if k not in truth:
+            sys.exit(f"[render_truth] STOP: missing required key '{k}' in {truth_path}")
+        if not isinstance(truth[k], typ) or isinstance(truth[k], bool) != (typ is bool):
+            # bool is a subclass of int — guard explicitly
+            if typ is bool and not isinstance(truth[k], bool):
+                sys.exit(f"[render_truth] STOP: '{k}' must be bool in {truth_path}")
+            if typ is int and isinstance(truth[k], bool):
+                sys.exit(f"[render_truth] STOP: '{k}' must be int (not bool) in {truth_path}")
+            if typ is float and isinstance(truth[k], bool):
+                sys.exit(f"[render_truth] STOP: '{k}' must be float in {truth_path}")
+            if typ in (int, float) and not isinstance(truth[k], (int, float)):
+                sys.exit(f"[render_truth] STOP: '{k}' must be {typ.__name__} in {truth_path}")
+    if str(truth.get("pipeline", "")).lower() not in ("musetalk_v15", "musetalk_v1.5"):
+        sys.exit(f"[render_truth] STOP: pipeline={truth.get('pipeline')!r}, this renderer "
+                 "only supports the MuseTalk v1.5 production pipeline (musetalk_v15).")
+    return truth
 
 
 def split_script(text, split_by='sentence'):
@@ -158,7 +218,7 @@ def _build_graph_runner(model, batch_size, model_dtype):
     return runner, ok
 
 
-def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0):
+def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0):
     vae, unet, pe, timesteps, audio_processor = model
     frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle = avatar_data
     wav_data, sr = sf.read(audio_path, dtype='float32')
@@ -225,6 +285,17 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     if audio_context_left:
         print(f'Audio context: left={audio_context_left} total={AUDIO_CONTEXT_TOTAL} '
               f'window=[center-{audio_context_left}, center+{AUDIO_CONTEXT_TOTAL-audio_context_left})')
+    # Stage 5 articulation: a single global conditioning gain on the Whisper
+    # audio features BEFORE the positional encoder (PE is linear, so this is
+    # mathematically a uniform scale of the MuseTalk cross-attention conditioning
+    # input — an "expression intensity" knob, NOT a per-feature multiplier).
+    # gain=1.0 is a pure no-op (the multiply is skipped entirely) so the
+    # ai-avatar-lipsync-v1-stable checkpoint is reproduced bit-identically.
+    # The gain scales conditioning AMPLITUDE, not WHICH frame maps to WHICH
+    # audio window, so it cannot shift AV timing — but SyncNet still guards it.
+    if audio_conditioning_gain != 1.0:
+        print(f'Audio conditioning gain: {audio_conditioning_gain:.3f} '
+              f'(expression intensity; 1.0 = stable)')
     h, w = frame_list_cycle[0].shape[:2]
     length = len(input_latent_list_cycle)
     model_dtype = _model_dtype(unet.model)
@@ -263,6 +334,10 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
             whisper_feature[max(0, min(n_feat - 1, idx))]
             for idx in range(start_f, start_f + AUDIO_CONTEXT_TOTAL)
         ], axis=0)  # [10, 5, 384]
+        # Stage 5: apply the conditioning gain as a single multiply on the
+        # whole [10,5,384] window. Skipped when gain==1.0 for bit-identity.
+        if audio_conditioning_gain != 1.0:
+            sel = sel * np.float32(audio_conditioning_gain)
         all_whisper_chunks.append(sel.reshape(-1, 384))  # [50, 384]
 
     # ffmpeg rawvideo -> libx264 ultrafast pipe (replaces cv2.VideoWriter mp4v).
@@ -346,48 +421,110 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     print(f'Done: {output_path}')
 
 
+def _print_banner(mode, truth, eff, avatar_id, audio_desc, output):
+    print('=' * 52)
+    print(f'AI AVATAR — {mode}')
+    print('=' * 52)
+    print('Pipeline: MuseTalk v1.5')
+    print('LOCKED QUALITY CONFIG:')
+    print(f'  Audio gain: {eff["audio_conditioning_gain"]}')
+    print(f'  Audio context left: {eff["audio_context_left"]}')
+    print(f'  Audio feature offset: {eff["audio_feature_offset_frames"]}')
+    print(f'  FPS: {eff["fps"]}')
+    print(f'  Resolution: {truth["resolution_width"]}x{truth["resolution_height"]} '
+          f'(composite_max_dim {truth["composite_max_dim"]})')
+    print(f'  CUDA Graph: {"ON" if truth["cuda_graph"] else "OFF"}')
+    print(f'  Long-audio WOLA: {"ON" if truth["long_audio_wola"] else "OFF"}')
+    print(f'  Feature coverage guard: {"ON" if truth["feature_coverage_assertion"] else "OFF"}')
+    print('VARIABLE JOB INPUT:')
+    print(f'  Avatar: {avatar_id}')
+    print(f'  Audio: {audio_desc}')
+    print(f'  Output: {output}')
+    print(f'Config source: {TRUTH_PATH}')
+    print('=' * 52)
+
+
 def main():
-    parser = argparse.ArgumentParser(description='LiveTalking Offline Script Video Generator (optimized)')
-    parser.add_argument('--script', required=True)
-    parser.add_argument('--avatar_id', required=True)
+    parser = argparse.ArgumentParser(
+        description='AI Avatar — production MuseTalk v1.5 lip-sync renderer. '
+                    'Locked quality config is loaded from config/render_truth.json; '
+                    'only avatar_id / script|audio / output vary per job.')
+    # --- VARIABLE job inputs ---
+    parser.add_argument('--avatar_id', required=True,
+                        help='prepared avatar id under data/avatars/ (VARIABLE input)')
+    parser.add_argument('--script', default=None,
+                        help='text script for EdgeTTS (VARIABLE input). Required unless --audio.')
+    parser.add_argument('--audio', default=None,
+                        help='master WAV audio file (VARIABLE input). Skips TTS. Required unless --script.')
     parser.add_argument('--output', default=os.path.join('D:\\', 'CongThang_AI_Avatar', 'renders', 'output.mp4'))
-    parser.add_argument('--fps', type=int, default=25)
-    parser.add_argument('--voice', default='vi-VN-HoaiMyNeural')
+    parser.add_argument('--voice', default='vi-VN-HoaiMyNeural',
+                        help='EdgeTTS voice (convenience; NOT part of the render truth)')
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--split_by', choices=['line','sentence','all'], default='sentence')
-    parser.add_argument('--face_enhance', action='store_true', help='Enable GFPGAN face restoration (needs models/GFPGANv1.4.pth)')
-    parser.add_argument('--audio-feature-offset-frames', type=int, default=0,
-                        help='Stage 3 temporal offset in VIDEO frames. +N = use audio '
-                             'features N*40ms LATER (mouth anticipates/leads more); '
-                             '-N = use audio N*40ms EARLIER (mouth lags more). '
-                             'Default 0 = unchanged. Does not touch the final audio track.')
-    parser.add_argument('--audio-context-left', type=int, default=0,
-                        help='Stage 4 audio context: number of the 10 conditioning '
-                             'features placed BEFORE the aligned center (0=future-only '
-                             '[0,+10) current offline; 4=realtime/official [-4,+6); '
-                             '5=symmetric [-5,+5)). Default 0 = unchanged Stage 3. '
-                             'Total stays 10 -> MuseTalk conditioning [50,384] unchanged.')
+    parser.add_argument('--face_enhance', action='store_true',
+                        help='Enable GFPGAN face restoration (needs models/GFPGANv1.4.pth)')
+    # --- LOCKED quality knobs. Forced from render_truth.json in production mode;
+    # honored only under --experimental-config for research (run flagged non-production). ---
+    parser.add_argument('--fps', type=int, default=None,
+                        help='LOCKED by render_truth.json unless --experimental-config')
+    parser.add_argument('--audio-feature-offset-frames', type=int, default=None,
+                        help='LOCKED by render_truth.json unless --experimental-config')
+    parser.add_argument('--audio-context-left', type=int, default=None,
+                        help='LOCKED by render_truth.json unless --experimental-config')
+    parser.add_argument('--audio-gain', type=float, default=None,
+                        help='LOCKED by render_truth.json unless --experimental-config')
+    parser.add_argument('--experimental-config', action='store_true',
+                        help='UNLOCK gain/ctx/offset/fps for research. The run is '
+                             'flagged EXPERIMENTAL and is NOT production truth.')
     args = parser.parse_args()
-    if not os.path.exists(args.script):
-        print(f'Script file not found: {args.script}'); sys.exit(1)
+
+    if not args.script and not args.audio:
+        sys.exit('STOP: provide --script <txt> (EdgeTTS) or --audio <master wav>. One is required.')
+
+    # ===== ONE PRODUCTION RENDER TRUTH =====
+    truth = load_render_truth()
+
+    # Fail closed on missing MuseTalk v1.5 weights.
+    _models = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')
+    if not os.path.isdir(os.path.join(_models, 'musetalkV15')):
+        sys.exit(f'[render_truth] STOP: MuseTalk v1.5 weights not found: {_models}/musetalkV15')
+    if not os.path.isdir(os.path.join(_models, 'whisper')):
+        sys.exit(f'[render_truth] STOP: Whisper model dir not found: {_models}/whisper')
+
+    # Fail closed on an incompatible avatar. Does NOT bend the pipeline — the
+    # operator must (pre)process the avatar via avatars/musetalk/genavatar.py.
+    validate_avatar(args.avatar_id)
+
+    # Push locked env knobs so the existing LIVETALKING_* reads pick them up.
+    os.environ['LIVETALKING_CUDA_GRAPH'] = 'true' if truth['cuda_graph'] else 'false'
+    os.environ['LIVETALKING_COMPOSITE_MAX_DIM'] = str(truth['composite_max_dim'])
+
+    # Resolve effective locked params.
+    locked = {
+        'fps': truth['fps'],
+        'audio_feature_offset_frames': truth['audio_feature_offset_frames'],
+        'audio_context_left': truth['audio_context_left'],
+        'audio_conditioning_gain': truth['audio_gain'],
+    }
+    cli_provided = {
+        'fps': args.fps,
+        'audio_feature_offset_frames': args.audio_feature_offset_frames,
+        'audio_context_left': args.audio_context_left,
+        'audio_conditioning_gain': args.audio_gain,
+    }
+    if args.experimental_config:
+        eff = {k: (cli_provided[k] if cli_provided[k] is not None else locked[k]) for k in locked}
+    else:
+        eff = dict(locked)
+        for k, v in cli_provided.items():
+            if v is not None:
+                print(f'[LOCKED] --{k.replace("_", "-")}={v} ignored; '
+                      f'render_truth.json forces {locked[k]}')
+
     out_dir = os.path.dirname(os.path.abspath(args.output))
     os.makedirs(out_dir, exist_ok=True)
-    with open(args.script, 'r', encoding='utf-8') as f: raw_text = f.read()
-    chunks = split_script(raw_text, args.split_by)
-    if not chunks: print('Script is empty.'); sys.exit(1)
-    full_text = ' '.join(chunks)
-    print(f'Script: {len(chunks)} chunks, {len(full_text)} chars')
-    print(f'Voice: {args.voice} | batch_size: {args.batch_size} | fps: {args.fps}')
 
-    setup_torch_flags()
-
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tts_path = os.path.join(tmpdir, 'tts.mp3')
-        wav_path = os.path.join(tmpdir, 'audio.wav')
-        print('Generating TTS audio (EdgeTTS, free)...')
-        generate_audio_edge_tts(full_text, tts_path, voice=args.voice)
-        print('Converting to WAV 16kHz mono...')
-        convert_audio_to_wav(tts_path, wav_path)
+    def _render(wav_path):
         print('Loading MuseTalk model...')
         vae, unet, pe = load_all_model()
         pe = pe.half().to(device)
@@ -398,9 +535,43 @@ def main():
         print(f'Loading avatar: {args.avatar_id}')
         avatar_data = load_avatar_data(args.avatar_id)
         render_video(wav_path, avatar_data, model, args.output,
-                     fps=args.fps, batch_size=args.batch_size, face_enhance=args.face_enhance,
-                     audio_feature_offset_frames=args.audio_feature_offset_frames,
-                     audio_context_left=args.audio_context_left)
+                     fps=eff['fps'], batch_size=args.batch_size, face_enhance=args.face_enhance,
+                     audio_feature_offset_frames=eff['audio_feature_offset_frames'],
+                     audio_context_left=eff['audio_context_left'],
+                     audio_conditioning_gain=eff['audio_conditioning_gain'])
+
+    setup_torch_flags()
+
+    if args.audio:
+        # --- TTS separation (Phase 14): consume a master audio file directly. ---
+        if not os.path.exists(args.audio):
+            sys.exit(f'STOP: master audio not found: {args.audio}')
+        _print_banner('PRODUCTION TRUTH' if not args.experimental_config
+                      else 'EXPERIMENTAL CONFIG — NOT PRODUCTION TRUTH',
+                      truth, eff, args.avatar_id, args.audio, args.output)
+        print(f'Using master audio: {args.audio}')
+        _render(args.audio)
+    else:
+        # EdgeTTS convenience path. TTS provider/voice is NOT part of the truth.
+        if not os.path.exists(args.script):
+            sys.exit(f'STOP: script file not found: {args.script}')
+        with open(args.script, 'r', encoding='utf-8') as f: raw_text = f.read()
+        chunks = split_script(raw_text, args.split_by)
+        if not chunks: sys.exit('STOP: script is empty.')
+        full_text = ' '.join(chunks)
+        print(f'Script: {len(chunks)} chunks, {len(full_text)} chars')
+        print(f'Voice: {args.voice} | batch_size: {args.batch_size} | fps: {eff["fps"]}')
+        _print_banner('PRODUCTION TRUTH' if not args.experimental_config
+                      else 'EXPERIMENTAL CONFIG — NOT PRODUCTION TRUTH',
+                      truth, eff, args.avatar_id, f'EdgeTTS:{args.voice}', args.output)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tts_path = os.path.join(tmpdir, 'tts.mp3')
+            wav_path = os.path.join(tmpdir, 'audio.wav')
+            print('Generating TTS audio (EdgeTTS, free)...')
+            generate_audio_edge_tts(full_text, tts_path, voice=args.voice)
+            print('Converting to WAV 16kHz mono...')
+            convert_audio_to_wav(tts_path, wav_path)
+            _render(wav_path)
 
 if __name__ == '__main__':
     main()

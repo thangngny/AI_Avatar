@@ -2,6 +2,8 @@ import unittest
 
 import numpy as np
 
+import os as _os, sys as _sys
+_sys.path.insert(0, _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))))
 from utils.image import analyze_loop_frames, forward_loop_index
 
 

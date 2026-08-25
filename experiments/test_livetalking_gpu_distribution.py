@@ -86,7 +86,7 @@ def query_nvidia_smi() -> Dict[int, Dict[str, float]]:
 
 
 def run_worker(args: argparse.Namespace) -> int:
-    repo_root = str(Path(__file__).resolve().parent)
+    repo_root = str(Path(__file__).resolve().parent.parent)
     if repo_root not in sys.path:
         sys.path.insert(0, repo_root)
     utils_pkg_path = str(Path(repo_root) / "utils")
@@ -200,7 +200,7 @@ def launch_worker(
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(physical_gpu)
     env["LT_WORKER_NAME"] = f"{scenario}_w{worker_idx}"
-    repo_root = str(Path(__file__).resolve().parent)
+    repo_root = str(Path(__file__).resolve().parent.parent)
     env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
     return subprocess.Popen(cmd, env=env)
 
