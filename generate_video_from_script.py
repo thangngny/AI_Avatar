@@ -166,6 +166,11 @@ def load_avatar_data(avatar_id):
             _scale = _max_dim / float(_long)
             _nw = max(2, int(round(_w0 * _scale)))
             _nh = max(2, int(round(_h0 * _scale)))
+            # libx264/yuv420p requires even W/H; round down to even (a 2941x5225
+            # portrait -> 1081x1920 otherwise, and the rawvideo->x264 pipe dies
+            # with OSError EINVAL on the first frame write).
+            _nw -= _nw & 1
+            _nh -= _nh & 1
             print(f'[load_avatar] downscale composite {_w0}x{_h0} -> {_nw}x{_nh} '
                   f'(scale {_scale:.3f}, LIVETALKING_COMPOSITE_MAX_DIM={_max_dim})')
             frame_list_cycle = [cv2.resize(f, (_nw, _nh)) for f in frame_list_cycle]
@@ -550,7 +555,19 @@ def main():
                       else 'EXPERIMENTAL CONFIG — NOT PRODUCTION TRUTH',
                       truth, eff, args.avatar_id, args.audio, args.output)
         print(f'Using master audio: {args.audio}')
-        _render(args.audio)
+        # Normalize the master audio to 16kHz mono + apad (Whisper expects 16kHz).
+        # The TTS path does this via convert_audio_to_wav; the --audio path must
+        # too, otherwise a 48kHz master WAV makes Whisper treat the audio as 3x
+        # too long (3x features, wrong lip-sync, and a broken rawvideo pipe).
+        import shutil
+        tmpdir = tempfile.mkdtemp(prefix='avataraudio_')
+        try:
+            wav16k = os.path.join(tmpdir, 'audio16k.wav')
+            print('Normalizing master audio to 16kHz mono...')
+            convert_audio_to_wav(args.audio, wav16k)
+            _render(wav16k)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
     else:
         # EdgeTTS convenience path. TTS provider/voice is NOT part of the truth.
         if not os.path.exists(args.script):
