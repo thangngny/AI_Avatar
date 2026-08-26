@@ -13,7 +13,7 @@ CUDA graph are identical across candidates.
 
 Usage (latentsync_env, GPU1):
   set CUDA_VISIBLE_DEVICES=1
-  python sweep_musetalk_audio_offset.py --script script_20s.txt \
+  python sweep_musetalk_audio_offset.py --script data/input/scripts/script_20s.txt \
       --avatar_id fullbody_30_7_25fps --offsets -5 -4 -3 -2 -1 0 1 2 3 4 5
 """
 import argparse, os, sys, json, subprocess, time, csv

@@ -14,7 +14,7 @@ async def gen_tts(text, mp3):
 root = os.path.dirname(os.path.abspath(__file__))
 tmp = tempfile.mkdtemp()
 mp3 = os.path.join(tmp,"t.mp3"); wav = os.path.join(tmp,"a.wav")
-asyncio.get_event_loop().run_until_complete(gen_tts(open(os.path.join(root,"script_5min.txt"),encoding="utf-8").read(), mp3))
+asyncio.get_event_loop().run_until_complete(gen_tts(open(os.path.join(os.path.dirname(root),"data","input","scripts","script_5min.txt"),encoding="utf-8").read(), mp3))
 subprocess.run(["ffmpeg","-y","-i",mp3,"-ar","16000","-ac","1","-af","apad=pad_len=1600",wav],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 w,sr = sf.read(wav,dtype="float32"); w = w.mean(axis=1) if w.ndim>1 else w
 

@@ -22,6 +22,43 @@
 | Last update                | 2026-08-25                                   |
 | Last verified commit        | 5e295db (main HEAD)                          |
 
+## 1B. REPOSITORY LAYOUT (authoritative)
+
+Authoritative repo root (the only git repo for production):
+
+```text
+C:\CongThang_AI_Avatar\AI_avatar   (branch: main)
+```
+
+Key locations:
+
+```text
+Production renderer ........... generate_video_from_script.py   (repo root)
+Avatar preparation ............ create_avatar.py                (repo root)
+System preflight ............. system_status.py                (repo root)
+Production config (locked) .... config/render_truth.json
+Prepared avatars ............. data/avatars/<avatar_id>/       (full_imgs/, coords.pkl,
+                                                              latents.pt, mask/, mask_coords.pkl,
+                                                              avator_info.json)
+Raw avatar sources ........... data/input/avatar_sources/      (original .mp4/.mov/photo)
+Raw-source lineage index ..... data/avatar_sources.json        (data only, NOT render settings)
+Input scripts ................ data/input/scripts/
+Models (gitignored) .......... models/   (musetalkV15/, whisper/, syncnet/, GFPGAN*)
+Production outputs ........... external D:\CongThang_AI_Avatar\renders\ (default --output)
+Completed jobs (external) .... D:\CongThang_AI_Avatar\noble_live_25_8\  (indexed, not moved)
+Experiments/diagnostics ...... experiments/   (isolated; production never imports these)
+Archive (reports/legacy) ..... archive/       (historical; not runtime)
+Docs .......................... docs/          (SYSTEM_ARCHITECTURE.md, quickstart.md)
+```
+
+Duplicate/legacy copy (NOT authoritative — experimental/LatentSync workspace):
+
+```text
+C:\CongThang\AI_avatar   (separate git repo, branch experiment/latentsync-master-plus)
+```
+
+Production code must never import from it. See §8 and `docs/SYSTEM_ARCHITECTURE.md`.
+
 ## 2. LOCKED PRODUCTION TRUTH
 
 | Parameter                    | Locked Value | Can Job Override? |
@@ -86,7 +123,7 @@ input. (A future UI may pick a default for convenience only.)
 
 ## 5. LAST PRODUCTION VALIDATION
 
-Completed 7-part job, audited (see `SYSTEM_7PART_RENDER_CONFIG_AUDIT.md`):
+Completed 7-part job, audited (see `archive/reports/SYSTEM_7PART_RENDER_CONFIG_AUDIT.md`):
 
 ```text
 Output dir: D:\CongThang_AI_Avatar\noble_live_25_8\

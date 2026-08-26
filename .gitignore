@@ -64,3 +64,6 @@ models/
 dist
 gfpgan/weights/
 avatars/wav2lip/face_detection/detection/sfd/*.pth
+
+# Raw input workspace (mc_hamai photo-avatar source + recording scripts); like data/, kept on disk only
+input_25_8/

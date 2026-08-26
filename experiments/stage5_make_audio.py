@@ -10,7 +10,7 @@ the only variable that changes is articulation.
 
 Usage:
   latentsync_env\\Scripts\\python.exe stage5_make_audio.py \
-    --script script_stage5_continuous.txt \
+    --script data/input/scripts/script_stage5_continuous.txt \
     --out D:\\CongThang_AI_Avatar\\stage5\\master_continuous.wav
 """
 import argparse, os, re, subprocess, tempfile, asyncio

@@ -58,9 +58,9 @@ for sec in [10, 29, 30, 31]:
     check(f"synth {sec}s", sec, p)
 
 # real TTS 55s and 167.6s
-p55 = os.path.join(tmp, "tts_55.wav"); tts_wav(open(os.path.join(root,"script_50s.txt"),encoding="utf-8").read(), p55)
+p55 = os.path.join(tmp, "tts_55.wav"); tts_wav(open(os.path.join(os.path.dirname(root),"data","input","scripts","script_50s.txt"),encoding="utf-8").read(), p55)
 check("tts 55s", 55, p55)
-p167 = os.path.join(tmp, "tts_167.wav"); tts_wav(open(os.path.join(root,"script_5min.txt"),encoding="utf-8").read(), p167)
+p167 = os.path.join(tmp, "tts_167.wav"); tts_wav(open(os.path.join(os.path.dirname(root),"data","input","scripts","script_5min.txt"),encoding="utf-8").read(), p167)
 check("tts 167s", 167, p167)
 
 print("\n=== summary ===")

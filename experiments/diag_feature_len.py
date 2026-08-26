@@ -12,7 +12,7 @@ async def gen_tts(text, out_mp3):
     await c.save(out_mp3)
 
 def main():
-    text = open(os.path.join(os.path.dirname(__file__), "script_5min.txt"), encoding="utf-8").read()
+    text = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data","input","scripts","script_5min.txt"), encoding="utf-8").read()
     tmp = tempfile.mkdtemp()
     mp3 = os.path.join(tmp, "tts.mp3"); wav = os.path.join(tmp, "audio.wav")
     print("Generating EdgeTTS...")

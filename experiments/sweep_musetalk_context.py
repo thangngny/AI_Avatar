@@ -13,7 +13,7 @@ CSV + JSON ranked by lse_c with av_offset guardrail.
 
 Usage (latentsync_env, GPU1):
   set CUDA_VISIBLE_DEVICES=1
-  python sweep_musetalk_context.py --script script_artic.txt --avatar_id fullbody_30_7_25fps \
+  python sweep_musetalk_context.py --script data/input/scripts/script_artic.txt --avatar_id fullbody_30_7_25fps \
       --contexts 0 3 4 5 6 --offsets -5 -4 -3 -2 -1 0 1
 """
 import argparse, os, sys, json, subprocess, time, csv
