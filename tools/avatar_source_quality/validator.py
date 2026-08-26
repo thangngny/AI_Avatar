@@ -183,6 +183,12 @@ def analyze(path, n=8):
 
 
 def main():
+    # Be safe with non-ASCII paths (e.g. Vietnamese folder names) on cp1252 consoles.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
     ap = argparse.ArgumentParser(description="Offline raw avatar-source quality gate (EXPERIMENTAL)")
     ap.add_argument("--video", required=True)
     ap.add_argument("--json", default=None, help="write machine-readable JSON to this path")
