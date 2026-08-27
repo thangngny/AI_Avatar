@@ -315,9 +315,78 @@ async function renderCreate() {
   const el = $("#content");
   el.innerHTML = `
     <h1 class="view-title">Tạo AI Avatar mới</h1>
-    <p class="view-sub">Thêm video gốc → hệ thống kiểm tra → đánh giá → chuẩn bị → sẵn sàng</p>
+    <p class="view-sub">Video gốc → tự động kiểm tra → đánh giá → chuẩn bị → sẵn sàng</p>
+    <div class="guide-panel">
+      <div class="guide-title">VIDEO NHƯ THẾ NÀO SẼ CHO KẾT QUẢ TỐT?</div>
+      <div class="guide-grid">
+        <div class="guide-row"><span class="gr-label">Thời lượng</span><span class="gr-text">30–60 giây</span><span class="help" data-tip="Đủ dài để hệ thống học khẩu hình, đủ ngắn để xử lý nhanh.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Khuôn hình</span><span class="gr-text">Dọc, ưu tiên 9:16</span><span class="help" data-tip="Khung dọc phù hợp với đầu ra video dọc 1080×1920.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Khuôn mặt</span><span class="gr-text">Đủ lớn và rõ</span><span class="help" data-tip="Khuôn mặt càng lớn trong khung, hệ thống càng có nhiều chi tiết môi để tạo khẩu hình.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Góc mặt</span><span class="gr-text">Nhìn gần chính diện</span><span class="help" data-tip="Nhìn thẳng vào camera giúp lipsync chính xác nhất.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Miệng</span><span class="gr-text">Không nói, tự nhiên</span><span class="help" data-tip="Miệng nghỉ giúp hệ thống tạo khẩu hình mới. Nếu nhân vật nói trong video nguồn, khẩu hình bị 'baked-in' mở miệng.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Cằm / hàm</span><span class="gr-text">Hiển thị đầy đủ</span><span class="help" data-tip="Cằm và đường hàm đầy đủ giúp vùng ghép miệng ổn định.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Camera</span><span class="gr-text">Cố định</span><span class="help" data-tip="Camera cố định giúp khung mặt không lệch. Camera rung giảm chất lượng.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Ánh sáng</span><span class="gr-text">Ổn định, đều</span><span class="help" data-tip="Ánh sáng ổn định giúp chi tiết môi nhất quán. Ánh sáng thay đổi làm chất lượng khẩu hình không đều.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Chuyển động</span><span class="gr-text">Chỉ nhẹ, tự nhiên</span><span class="help" data-tip="Chuyển động lớn làm khuôn mặt lệch khỏi vùng crop. Chỉ nên chớp mắt, thở, nghiêng đầu rất nhẹ.">ⓘ</span></div>
+        <div class="guide-row"><span class="gr-label">Chất lượng file</span><span class="gr-text">Gửi file gốc</span><span class="help" data-tip="File gốc giữ độ nét. File qua app mạng xã hội bị nén, giảm chất lượng.">ⓘ</span></div>
+      </div>
+      <button class="ghost" onclick="toggleGuideDetail()" style="margin-top:10px;font-size:12px">Xem hướng dẫn chi tiết</button>
+      <div class="guide-detail" id="guideDetail" style="display:none">
+        <div class="guide-cols">
+          <div class="guide-col should">
+            <h3>NÊN</h3>
+            <ul>
+              <li>Quay từ ngực/vai trở lên</li>
+              <li>Khuôn mặt đủ lớn trong khung hình</li>
+              <li>Nhìn gần thẳng vào camera</li>
+              <li>Miệng ở trạng thái tự nhiên, nghỉ</li>
+              <li>Không nói trong video nguồn</li>
+              <li>Nhìn thấy đầy đủ môi và cằm</li>
+              <li>Camera cố định</li>
+              <li>Ánh sáng ổn định</li>
+              <li>Chớp mắt và thở tự nhiên</li>
+              <li>Chỉ chuyển động đầu/vai rất nhẹ</li>
+            </ul>
+          </div>
+          <div class="guide-col avoid">
+            <h3>TRÁNH</h3>
+            <ul>
+              <li>Đứng quá xa camera</li>
+              <li>Nói liên tục</li>
+              <li>Quay nghiêng quá nhiều</li>
+              <li>Che môi hoặc cằm</li>
+              <li>Camera rung</li>
+              <li>Di chuyển cơ thể mạnh</li>
+              <li>Ánh sáng thay đổi liên tục</li>
+              <li>Motion blur</li>
+              <li>File bị nén mạnh</li>
+            </ul>
+          </div>
+        </div>
+        <div class="framing-diagram">
+          <div style="text-align:center">
+            <div class="framing-box good"><div class="head"></div><div class="shoulders"></div></div>
+            <div class="framing-label">NÊN: đầu + vai</div>
+          </div>
+          <div style="text-align:center">
+            <div class="framing-box bad"><div class="stick-head"></div><div class="stick"></div></div>
+            <div class="framing-label">TRÁNH: xa, mặt nhỏ</div>
+          </div>
+        </div>
+        <div class="checklist">
+          <div class="ci">Video khoảng 30–60 giây</div>
+          <div class="ci">Nhân vật nhìn gần chính diện</div>
+          <div class="ci">Khuôn mặt đủ lớn</div>
+          <div class="ci">Nhân vật không nói</div>
+          <div class="ci">Môi và cằm nhìn rõ</div>
+          <div class="ci">Camera cố định</div>
+          <div class="ci">Ánh sáng ổn định</div>
+          <div class="ci">Gửi file gốc, không nén</div>
+        </div>
+      </div>
+    </div>
     <div class="card">
-      <h2>1. Tải video lên</h2>
+      <h2>Tải video lên</h2>
       <div class="dropzone" id="cDrop">
         <div class="big">⬆</div>
         <div>Kéo thả video vào đây hoặc bấm để chọn<br><span class="muted2">.mp4 .mov .avi .mkv .webm — tự động kiểm tra khi tải lên</span></div>
@@ -334,6 +403,11 @@ async function renderCreate() {
   dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("drag"); if (e.dataTransfer.files[0]) handleCreateFile(e.dataTransfer.files[0]); };
   $("#cFile").onchange = (e) => { if (e.target.files[0]) handleCreateFile(e.target.files[0]); };
   if (createState.prepAvatarId) pollPrep();
+}
+function toggleGuideDetail() {
+  const d = $("#guideDetail");
+  if (!d) return;
+  d.style.display = d.style.display === "none" ? "block" : "none";
 }
 async function handleCreateFile(f) {
   const fd = new FormData(); fd.append("video", f);
@@ -353,17 +427,32 @@ async function handleCreateFile(f) {
   renderQuality(d);
 }
 function renderQuality(d) {
-  const ic = (s) => s === "PASS" ? `<span class="ic pass">✓</span>` :
-    s === "WARN" ? `<span class="ic warn">⚠</span>` : `<span class="ic fail">✗</span>`;
+  const catLabel = {
+    VIDEO_INTEGRITY: "Tính toàn vẹn", FACE_SIZE: "Kích thước khuôn mặt",
+    FACE_SHARPNESS: "Độ nét khuôn mặt", FRONTALNESS: "Góc mặt",
+    MOUTH_VISIBILITY: "Miệng nhìn rõ", CHIN_VISIBILITY: "Cằm / hàm",
+    SOURCE_MOUTH_STATE: "Trạng thái miệng", MOTION: "Chuyển động",
+    LIGHTING: "Ánh sáng",
+  };
+  const ic = (s) => s === "PASS" ? `<span class="cr-ic pass">✓</span>` :
+    s === "WARN" ? `<span class="cr-ic warn">⚠</span>` :
+    s === "FAIL" ? `<span class="cr-ic fail">✗</span>` :
+    `<span class="cr-ic na">—</span>`;
   const rows = (d.categories || []).map(c =>
-    `<div class="qrow"><span class="ql">${ic(c.status)} ${esc(c.message)}</span></div>`).join("");
-  const overallCls = d.overall === "PASS" ? "pass" : d.overall === "WARN" ? "warn" : "fail";
+    `<div class="compare-row">${ic(c.status)}<span class="cr-label">${esc(catLabel[c.category] || c.category)}</span><span class="cr-val">${esc(c.message || "")}</span></div>`).join("");
+  const overallCls = d.overall === "PASS" ? "tot" : d.overall === "WARN" ? "warn" : "fail";
   const overallTxt = d.overall === "PASS" ? "TỐT — nguồn phù hợp." :
-    d.overall === "WARN" ? "CẢNH BÁO — dùng được, nhưng chất lượng khẩu hình có thể thấp hơn." : "KÉM — chất lượng thấp; vẫn có thể dùng nếu cần.";
+    d.overall === "WARN" ? "CẢNH BÁO — dùng được, nhưng chất lượng khẩu hình có thể thấp hơn." :
+    "KHÔNG KHUYẾN NGHỊ — chất lượng thấp; vẫn có thể dùng nếu cần.";
+  const strengths = (d.categories || []).filter(c => c.status === "PASS").map(c => `✓ ${esc(catLabel[c.category] || c.category)}`).join("  ");
+  const warns = (d.categories || []).filter(c => c.status !== "PASS").map(c => `⚠ ${esc(catLabel[c.category] || c.category)}`).join("  ");
   $("#cQuality").innerHTML = `<div class="card">
-    <h2>Đánh giá chất lượng nguồn</h2>${rows}
-    <div class="qoverall ${overallCls}">${overallTxt}</div>
-    <div class="qhint">${d.overall === "PASS" ? "" : "Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này."}</div>
+    <h2>KIỂM TRA VIDEO</h2>
+    ${rows}
+    <div class="overall-result ${overallCls}">${overallTxt}</div>
+    ${strengths ? `<div class="compare-explain"><b>Điểm tốt:</b> ${strengths}</div>` : ""}
+    ${warns ? `<div class="compare-explain"><b>Điểm cần lưu ý:</b> ${warns}</div>` : ""}
+    ${d.overall !== "PASS" ? `<div class="qhint">Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này.</div>` : ""}
     <div class="actions">
       <button class="ghost" onclick="resetCreate()">Chọn video khác</button>
       <button class="primary" onclick="showPrepare()">${d.overall === "PASS" ? "Tiếp tục" : "Vẫn sử dụng video này"}</button>

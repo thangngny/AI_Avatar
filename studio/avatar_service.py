@@ -211,36 +211,36 @@ def avatar_thumbnail_path(avatar_id: str) -> Optional[str]:
 # -> {PASS/WARN/FAIL: human message}. Falls back to the validator's own note.
 _HUMAN = {
     "FACE_SIZE": {
-        "WARN": "Face is small in the frame. A closer recording may produce clearer mouth movements.",
-        "FAIL": "Face is quite small / far from camera. Lip-sync quality will be low; use a closer recording if possible.",
+        "WARN": "Khuôn mặt hơi nhỏ trong khung hình. Nên quay gần hơn để vùng môi có nhiều chi tiết hơn.",
+        "FAIL": "Khuôn mặt khá nhỏ / xa camera. Chất lượng khẩu hình sẽ thấp; nên dùng nguồn quay gần hơn nếu có thể.",
     },
     "FACE_SHARPNESS": {
-        "WARN": "Face is slightly blurred. A sharper source improves mouth detail.",
-        "FAIL": "Face is very blurred. Mouth articulation will be poor.",
+        "WARN": "Khuôn mặt hơi mờ. Nguồn sắc nét hơn giúp chi tiết môi tốt hơn.",
+        "FAIL": "Khuôn mặt rất mờ. Khẩu hình sẽ kém.",
     },
     "FRONTALNESS": {
-        "WARN": "Face is turned slightly away. A frontal face works best.",
-        "FAIL": "Face is not frontal enough for reliable lip-sync.",
+        "WARN": "Mặt hơi lệch. Nhìn thẳng vào camera cho kết quả tốt nhất.",
+        "FAIL": "Mặt lệch nhiều, không đủ chính diện cho lipsync ổn định.",
     },
     "MOUTH_VISIBILITY": {
-        "WARN": "Mouth is partly out of frame. Keep the whole mouth visible.",
-        "FAIL": "Mouth is not reliably visible in the frame.",
+        "WARN": "Miệng hơi ra khỏi khung. Giữ toàn bộ miệng nhìn thấy.",
+        "FAIL": "Miệng không nhìn thấy rõ trong khung.",
     },
     "CHIN_VISIBILITY": {
-        "WARN": "Limited chin/jaw room. Include the chin and jaw in the frame.",
-        "FAIL": "Chin/jaw is cropped. The mask needs the full jaw.",
+        "WARN": "Cằm/hàm hơi sát mép. Bao gồm cả cằm và đường hàm trong khung.",
+        "FAIL": "Cằm/hàm bị cắt. Mask cần đường hàm đầy đủ.",
     },
     "SOURCE_MOUTH_STATE": {
-        "WARN": "The person is already speaking in the source video. A neutral-mouth source is recommended.",
-        "FAIL": "The source has strong talking/expression. A still, neutral-mouth source is strongly recommended.",
+        "WARN": "Nhân vật đang nói trong video nguồn. Nên dùng nguồn miệng nghỉ, trung tính.",
+        "FAIL": "Nguồn có nói nhiều / biểu cảm mạnh. Nên dùng nguồn miệng nghỉ, trung tính.",
     },
     "MOTION": {
-        "WARN": "Some camera/subject motion detected. A stable source is better.",
-        "FAIL": "High motion/shake. A stable, still source is recommended.",
+        "WARN": "Có chuyển động camera/nhân vật. Nguồn cố định tốt hơn.",
+        "FAIL": "Chuyển động/rung nhiều. Nên dùng nguồn cố định, ổn định.",
     },
     "LIGHTING": {
-        "WARN": "Lighting flickers across the clip. Stable, even lighting is better.",
-        "FAIL": "Lighting is unstable. Use even, consistent lighting.",
+        "WARN": "Ánh sáng thay đổi trong video. Ánh sáng ổn định, đều tốt hơn.",
+        "FAIL": "Ánh sáng không ổn định. Nên dùng ánh sáng đều, ổn định.",
     },
 }
 
