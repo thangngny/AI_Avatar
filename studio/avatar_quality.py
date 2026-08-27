@@ -23,9 +23,13 @@ Quality status vs technical status are kept separate:
 import os
 import re
 import json
+import pickle
 import sqlite3
 import subprocess
 from typing import Dict, Any, Optional, List
+
+import cv2
+import numpy as np
 
 from . import config, db, runtime
 from .avatar_service import _torch_python, _read_info, _check_ready
@@ -83,6 +87,228 @@ def render_history(avatar_id: str) -> Dict[str, Any]:
     conf = (PROD_CAO if total >= 2 else PROD_TRUNG_BINH if total >= 1 else PROD_CHUA_KIEM_CHUNG)
     return {"db_complete": db_complete, "external": external, "total": total,
             "production_confidence": conf}
+
+
+# --------------------------------------------------------------------------- #
+# PREPARED AVATAR QUALITY ANALYSIS                                              #
+# --------------------------------------------------------------------------- #
+# Honest metrics derived ONLY from prepared artifacts (full_imgs, coords.pkl,
+# mask, mask_coords.pkl, avator_info.json) for avatars whose raw source is
+# missing. This is NOT source quality — it cannot tell us whether the original
+# source was talking, original camera stability, original lighting, or raw
+# resolution. Those dimensions are explicitly marked unavailable. Provenance =
+# PREPARED_ANALYSIS. Never overwrites RAW_VALIDATOR source results.
+
+_PREP_SAMPLE = 8  # frames to sample (keeps analysis fast, in-process cv2)
+
+
+def _lapvar(img_gray):
+    return float(cv2.Laplacian(img_gray, cv2.CV_64F).var())
+
+
+def prepared_analysis(avatar_id: str) -> Dict[str, Any]:
+    """Measure what is genuinely measurable from PREPARED artifacts. Read-only;
+    never touches the prepared files. Returns a structured prepared-quality
+    dict. Provenance = PREPARED_ANALYSIS."""
+    d = os.path.join(config.AVATARS_ROOT, avatar_id)
+    if not os.path.isdir(d):
+        return {"prepared_status": CHUA_CO_DU_LIEU, "provenance": SRC_UNKNOWN,
+                "dimensions": [], "strengths": [], "warnings": []}
+    info = _read_info(d) or {}
+    full_dir = os.path.join(d, "full_imgs")
+    mask_dir = os.path.join(d, "mask")
+    if not os.path.isdir(full_dir) or not os.path.isdir(mask_dir):
+        return {"prepared_status": CHUA_CO_DU_LIEU, "provenance": SRC_UNKNOWN,
+                "dimensions": [], "strengths": [], "warnings": []}
+
+    full_imgs = sorted([f for f in os.listdir(full_dir)
+                        if f.lower().endswith((".png", ".jpg", ".jpeg"))])
+    masks = sorted([f for f in os.listdir(mask_dir)
+                    if f.lower().endswith((".png", ".jpg", ".jpeg"))])
+    coords = None
+    try:
+        with open(os.path.join(d, "coords.pkl"), "rb") as f:
+            coords = pickle.load(f)
+    except Exception:
+        coords = None
+
+    # First frame for resolution.
+    first = cv2.imread(os.path.join(full_dir, full_imgs[0])) if full_imgs else None
+    if first is None:
+        return {"prepared_status": CHUA_CO_DU_LIEU, "provenance": SRC_UNKNOWN,
+                "dimensions": [], "strengths": [], "warnings": []}
+    H, W = first.shape[:2]
+
+    # Sample frame indices evenly.
+    n = len(full_imgs)
+    n_sample = min(_PREP_SAMPLE, n)
+    idxs = [int(i * (n - 1) / max(n_sample - 1, 1)) for i in range(n_sample)] if n_sample > 1 else [0]
+
+    dims = []
+    strengths = []
+    warnings = []
+
+    # 7. Frame count / integrity
+    integrity_ok = (len(full_imgs) == len(masks) and coords is not None
+                    and len(coords) == len(full_imgs) and len(full_imgs) >= 1)
+    fc_level = TOT if (len(full_imgs) >= 100 and integrity_ok) else (CANH_BAO if integrity_ok else KHONG_KHUYEN_NGHI)
+    dims.append({"key": "frame_integrity", "label": "Số frame / tính toàn vẹn",
+                 "level": fc_level,
+                 "explanation": (f"{len(full_imgs)} frame, đầy đủ full_imgs/mask/coords." if integrity_ok
+                                 else "Thiếu frame hoặc không khớp full_imgs/mask/coords."),
+                 "value": {"frames": len(full_imgs), "masks": len(masks), "coords": len(coords) if coords else 0}})
+
+    # 8/9/10. Resolution, version, parsing mode (metadata, no level)
+    dims.append({"key": "resolution", "label": "Độ phân giải đã chuẩn bị",
+                 "level": None, "explanation": f"{W}×{H}", "value": {"width": W, "height": H}})
+    dims.append({"key": "version", "label": "Phiên bản", "level": None,
+                 "explanation": str(info.get("version")), "value": info.get("version")})
+    dims.append({"key": "parsing_mode", "label": "Chế độ parsing", "level": None,
+                 "explanation": str(info.get("parsing_mode")), "value": info.get("parsing_mode")})
+
+    # 2. Prepared face size (bbox_h / frame_h). coords = [x1,y1,x2,y2].
+    face_ratios = []
+    chin_rooms = []
+    centers = []
+    if coords:
+        for i in idxs:
+            if i >= len(coords):
+                continue
+            b = coords[i]
+            try:
+                x1, y1, x2, y2 = b[0], b[1], b[2], b[3]
+            except Exception:
+                continue
+            bh = y2 - y1
+            if bh <= 0 or H <= 0:
+                continue
+            face_ratios.append(bh / float(H))
+            chin_rooms.append((H - y2) / float(bh) if bh > 0 else 0)
+            centers.append(((x1 + x2) / 2.0, (y1 + y2) / 2.0))
+    fr = float(np.median(face_ratios)) if face_ratios else None
+    fs_level = (TOT if fr and fr >= 0.10 else CANH_BAO if fr and fr >= 0.07 else KHONG_KHUYEN_NGHI if fr else CHUA_CO_DU_LIEU)
+    if fr and fr >= 0.10: strengths.append("Vùng mặt đủ lớn")
+    elif fr: warnings.append("Vùng mặt hơi nhỏ")
+    dims.append({"key": "face_size", "label": "Kích thước vùng mặt (đã chuẩn bị)",
+                 "level": fs_level,
+                 "explanation": (f"Tỉ lệ mặt/frame ≈ {fr:.3f}." if fr else "Không đo được."),
+                 "value": round(fr, 4) if fr else None})
+
+    # 6. Chin/mouth coverage
+    cr = float(np.median(chin_rooms)) if chin_rooms else None
+    cr_level = (TOT if cr and cr >= 0.3 else CANH_BAO if cr and cr >= 0.1 else KHONG_KHUYEN_NGHI if cr is not None else CHUA_CO_DU_LIEU)
+    if cr and cr >= 0.3: strengths.append("Vùng cằm/miệng đầy đủ")
+    elif cr is not None and cr < 0.1: warnings.append("Vùng cằm sát mép")
+    dims.append({"key": "chin_coverage", "label": "Bao phủ vùng cằm/miệng",
+                 "level": cr_level,
+                 "explanation": (f"Không gian dưới mặt ≈ {cr:.2f}× chiều cao mặt." if cr is not None else "Không đo được."),
+                 "value": round(cr, 3) if cr is not None else None})
+
+    # 3. Crop position stability (std of bbox center across sampled frames)
+    if len(centers) >= 2:
+        arr = np.array(centers)
+        cstd = float(np.mean([arr[:, 0].std(), arr[:, 1].std()]))
+    else:
+        cstd = None
+    cp_level = (TOT if cstd is not None and cstd < 8 else CANH_BAO if cstd is not None and cstd < 25 else KHONG_KHUYEN_NGHI if cstd is not None else CHUA_CO_DU_LIEU)
+    if cstd is not None and cstd < 8: strengths.append("Crop khuôn mặt ổn định")
+    elif cstd is not None and cstd >= 25: warnings.append("Crop khuôn mặt lệch nhiều")
+    dims.append({"key": "crop_stability", "label": "Độ ổn định vị trí crop",
+                 "level": cp_level,
+                 "explanation": (f"Độ lệch trung bình ≈ {cstd:.1f}px." if cstd is not None else "Không đo được (1 frame)."),
+                 "value": round(cstd, 2) if cstd is not None else None})
+
+    # 1. Face-crop sharpness (Laplacian var on the face bbox region — comparable
+    # to the validator's face sharpness, NOT full-frame which is dominated by
+    # smooth body/background).
+    laps = []
+    for i in idxs:
+        img = cv2.imread(os.path.join(full_dir, full_imgs[i]))
+        if img is None:
+            continue
+        crop = None
+        if coords and i < len(coords):
+            b = coords[i]
+            try:
+                x1, y1, x2, y2 = int(b[0]), int(b[1]), int(b[2]), int(b[3])
+                crop = img[max(0, y1):min(H, y2), max(0, x1):min(W, x2)]
+            except Exception:
+                crop = None
+        g = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY) if crop is not None and crop.size else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        laps.append(_lapvar(g))
+    sh = float(np.median(laps)) if laps else None
+    sh_level = (TOT if sh and sh >= 120 else CANH_BAO if sh and sh >= 50 else KHONG_KHUYEN_NGHI if sh is not None else CHUA_CO_DU_LIEU)
+    if sh and sh >= 120: strengths.append("Frame rõ")
+    elif sh is not None and sh < 50: warnings.append("Frame hơi mờ")
+    dims.append({"key": "sharpness", "label": "Độ nét vùng mặt (đã chuẩn bị)",
+                 "level": sh_level,
+                 "explanation": (f"Độ nét vùng mặt (Laplacian) ≈ {sh:.1f}." if sh else "Không đo được."),
+                 "value": round(sh, 1) if sh else None})
+
+    # 4. Motion in prepared frames (mean frame-to-frame diff, sampled)
+    motion = None
+    if len(idxs) >= 2:
+        diffs = []
+        prev = None
+        for i in idxs:
+            img = cv2.imread(os.path.join(full_dir, full_imgs[i]))
+            if img is None:
+                continue
+            g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            if prev is not None:
+                diffs.append(float(cv2.absdiff(g, prev).mean()))
+            prev = g
+        motion = float(np.mean(diffs)) if diffs else None
+    m_level = (TOT if motion is not None and motion < 15 else CANH_BAO if motion is not None and motion < 40 else KHONG_KHUYEN_NGHI if motion is not None else CHUA_CO_DU_LIEU)
+    if motion is not None and motion < 15: strengths.append("Chuyển động prepared ổn định")
+    elif motion is not None and motion >= 40: warnings.append("Chuyển động prepared nhiều")
+    dims.append({"key": "motion", "label": "Độ ổn định chuyển động (prepared)",
+                 "level": m_level,
+                 "explanation": (f"Mean frame-to-frame diff ≈ {motion:.2f}." if motion is not None else "Không đo được (1 frame)."),
+                 "value": round(motion, 2) if motion is not None else None})
+
+    # 5. Mask stability (std of mask non-zero area across sampled masks)
+    mask_areas = []
+    for i in idxs:
+        if i >= len(masks):
+            continue
+        m = cv2.imread(os.path.join(mask_dir, masks[i]), cv2.IMREAD_GRAYSCALE)
+        if m is None:
+            continue
+        mask_areas.append(float((m > 0).sum()))
+    if len(mask_areas) >= 2:
+        ma = np.array(mask_areas)
+        mask_cv = float(ma.std() / (ma.mean() + 1e-6))
+    else:
+        mask_cv = None
+    mk_level = (TOT if mask_cv is not None and mask_cv < 0.10 else CANH_BAO if mask_cv is not None and mask_cv < 0.30 else KHONG_KHUYEN_NGHI if mask_cv is not None else CHUA_CO_DU_LIEU)
+    if mask_cv is not None and mask_cv < 0.10: strengths.append("Mask ổn định")
+    elif mask_cv is not None and mask_cv >= 0.30: warnings.append("Mask không ổn định")
+    dims.append({"key": "mask_stability", "label": "Độ ổn định mask",
+                 "level": mk_level,
+                 "explanation": (f"Hệ số biến thiên diện tích mask ≈ {mask_cv:.3f}." if mask_cv is not None else "Không đo được (1 frame)."),
+                 "value": round(mask_cv, 3) if mask_cv is not None else None})
+
+    # Prepared overall: any KHÔNG KHUYẾN NGHỊ -> KHÔNG KHUYẾN NGHỊ; elif any
+    # CẢNH BÁO -> CẢNH BÁO; else TỐT. (CHƯA CÓ DỮ LIỆU dims don't count.)
+    levels = [x["level"] for x in dims if x.get("level") in (TOT, CANH_BAO, KHONG_KHUYEN_NGHI)]
+    if KHONG_KHUYEN_NGHI in levels:
+        prepared_status = KHONG_KHUYEN_NGHI
+    elif CANH_BAO in levels:
+        prepared_status = CANH_BAO
+    elif levels:
+        prepared_status = TOT
+    else:
+        prepared_status = CHUA_CO_DU_LIEU
+
+    return {
+        "prepared_status": prepared_status,
+        "provenance": SRC_PREPARED,
+        "dimensions": dims,
+        "strengths": strengths,
+        "warnings": warnings,
+        "face_h_ratio_prepared": round(fr, 4) if fr else None,
+    }
 
 
 def resolve_raw_source(avatar_id: str) -> Optional[str]:
@@ -326,6 +552,7 @@ def build_quality(avatar_id: str, vresult: Dict[str, Any],
         "recommendation": _recommendation(overall, warnings),
         "production_confidence": rh["production_confidence"],
         "render_history": rh,
+        "prepared_quality": prepared_analysis(avatar_id),
         "video": {
             "width": integrity.get("width"),
             "height": integrity.get("height"),
@@ -357,6 +584,7 @@ def _no_data_quality(avatar_id: str, source_path: Optional[str]) -> Dict[str, An
                            else "Chưa có đủ dữ liệu để đánh giá chất lượng nguồn."),
         "production_confidence": rh["production_confidence"],
         "render_history": rh,
+        "prepared_quality": prepared_analysis(avatar_id),
         "video": {},
     }
 
@@ -450,7 +678,9 @@ def quality_summary_for_list(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if not q:
         return {"quality_status": CHUA_CO_DU_LIEU, "strengths": [], "warnings": [],
                 "quality_source": SRC_UNKNOWN, "face_h_ratio": None,
-                "production_confidence": PROD_CHUA_KIEM_CHUNG, "render_count": 0}
+                "production_confidence": PROD_CHUA_KIEM_CHUNG, "render_count": 0,
+                "prepared_status": CHUA_CO_DU_LIEU,
+                "prepared_strengths": [], "prepared_warnings": []}
     return {
         "quality_status": q.get("quality_status", CHUA_CO_DU_LIEU),
         "strengths": (q.get("strengths") or [])[:4],
@@ -459,4 +689,8 @@ def quality_summary_for_list(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "face_h_ratio": q.get("face_h_ratio"),
         "production_confidence": q.get("production_confidence", PROD_CHUA_KIEM_CHUNG),
         "render_count": (q.get("render_history") or {}).get("total", 0),
+        "prepared_status": ((q.get("prepared_quality") or {}).get("prepared_status")
+                            or CHUA_CO_DU_LIEU),
+        "prepared_strengths": ((q.get("prepared_quality") or {}).get("strengths") or [])[:4],
+        "prepared_warnings": ((q.get("prepared_quality") or {}).get("warnings") or [])[:4],
     }

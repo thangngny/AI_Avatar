@@ -511,8 +511,19 @@ function libraryCardHTML(a, recommended, recKind) {
   const prod = PROD_VI[a.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
   const prodBadge = a.ready && a.render_count > 0
     ? `<span class="tag ${prod.cls}" title="${a.render_count} render thực tế">Đã kiểm chứng (${a.render_count})</span>` : "";
-  const strengths = (a.quality_strengths || []).slice(0, 3).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
-  const warns = (a.quality_warnings || []).slice(0, 2).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
+  // Prepared-analysis badge (honest; present even when source is unknown).
+  const pm = qMeta(a.prepared_status || "CHƯA CÓ DỮ LIỆU");
+  const prepBadge = a.ready && a.prepared_status && a.prepared_status !== "CHƯA CÓ DỮ LIỆU"
+    ? `<span class="tag ${pm.cls}" title="Chất lượng avatar đã chuẩn bị">Đã chuẩn bị: ${esc(pm.short)}</span>` : "";
+  // Strengths/warnings: prefer source; fall back to prepared when source unknown.
+  let strengths, warns;
+  if (a.quality_strengths && a.quality_strengths.length) {
+    strengths = a.quality_strengths.slice(0, 3); warns = a.quality_warnings || [];
+  } else {
+    strengths = a.prepared_strengths || []; warns = a.prepared_warnings || [];
+  }
+  const sHtml = strengths.slice(0, 3).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
+  const wHtml = warns.slice(0, 2).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
   let rec = "";
   if (recommended) {
     if (recKind === "global") rec = `<div class="rec-badge">★ KHUYẾN NGHỊ</div>`;
@@ -531,8 +542,8 @@ function libraryCardHTML(a, recommended, recKind) {
     <div class="ac-body">
       <div class="ac-name">${esc(a.avatar_id)}</div>
       <div class="ac-sub">${esc(TYPE_VI[a.avatar_type] || a.avatar_type || "Không rõ")}</div>
-      <div class="ac-tags">${techBadge} <span class="tag ${qm.cls}">${esc(qm.short)}</span> ${prodBadge}</div>
-      ${strengths}${warns}
+      <div class="ac-tags">${techBadge} <span class="tag ${qm.cls}">Nguồn: ${esc(qm.short)}</span> ${prepBadge} ${prodBadge}</div>
+      ${sHtml}${wHtml}
       ${!a.ready ? `<div class="qs muted">AI Avatar này thiếu dữ liệu cần thiết, chưa thể render.</div>` : ""}
       <div class="ac-actions">
         ${useBtn}
@@ -575,7 +586,7 @@ function renderQualityModal(aid, q) {
   const dims = (q.dimensions || []).map(d => `
     <div class="dim-row">
       <div class="dim-label">${esc(d.label)}</div>
-      <div class="dim-level ${qMeta(d.level).cls}">${esc(qMeta(d.level).short || d.level)}</div>
+      <div class="dim-level ${qMeta(d.level).cls}">${esc(qMeta(d.level).short || d.level || "—")}</div>
       <div class="dim-explain">${esc(d.explanation || "")}</div>
     </div>`).join("");
   const strengths = (q.strengths || []).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
@@ -584,24 +595,44 @@ function renderQualityModal(aid, q) {
   const videoInfo = v.width ? `<div class="hint">Video nguồn: ${v.width}×${v.height} · ${v.fps} FPS · ${v.duration} giây</div>` : "";
   const provMap = { "RAW_VALIDATOR": "Đánh giá từ video nguồn (validator)", "PREPARED_ANALYSIS": "Phân tích từ dữ liệu đã chuẩn bị", "HISTORICAL_AUDIT": "Báo cáo kiểm chứng cũ", "UNKNOWN": "Chưa rõ nguồn đánh giá" };
   const prov = provMap[q.quality_source] || "Chưa rõ";
+  // --- Section B: prepared avatar quality ---
+  const pq = q.prepared_quality || {};
+  const pqm = qMeta(pq.prepared_status || "CHƯA CÓ DỮ LIỆU");
+  const pdims = (pq.dimensions || []).map(d => `
+    <div class="dim-row">
+      <div class="dim-label">${esc(d.label)}</div>
+      <div class="dim-level ${qMeta(d.level).cls}">${esc(qMeta(d.level).short || d.level || "—")}</div>
+      <div class="dim-explain">${esc(d.explanation || "")}</div>
+    </div>`).join("");
+  const pstrengths = (pq.strengths || []).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
+  const pwarns = (pq.warnings || []).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
+  const preparedSection = pq.dimensions && pq.dimensions.length ? `
+    <div class="qsection"><div class="qsection-t ${pqm.cls}">B. Chất lượng avatar đã chuẩn bị — ${esc(pqm.short || pq.prepared_status)}</div>
+      <div class="hint">Phân tích từ dữ liệu đã chuẩn bị (full_imgs, coords, mask) — KHÔNG phải chất lượng video nguồn. Không suy ra trạng thái nói/camera/ánh sáng gốc.</div>
+      <div class="dims">${pdims}</div>
+      ${pstrengths ? `<div class="qsection-t good" style="margin-top:8px">Điểm tốt</div>${pstrengths}` : ""}
+      ${pwarns ? `<div class="qsection-t warn" style="margin-top:8px">Điểm cần lưu ý</div>${pwarns}` : ""}
+    </div>` : "";
+  // --- Section C: production confidence ---
   const rh = q.render_history || {};
   const prod = PROD_VI[q.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
-  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">Độ tin cậy production (từ render thực tế)</div>
+  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">C. Độ tin cậy production (từ render thực tế) — ${esc(prod.short)}</div>
     <div class="hint">${q.production_confidence === "CHƯA KIỂM CHỨNG" ? "Chưa có render thực tế nào được ghi nhận." : `Đã có ${rh.total||0} render hoàn tất (DB: ${rh.db_complete||0}, file: ${rh.external||0}).`}</div></div>`;
   const dimsBlock = dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn (video nguồn gốc không còn).</div>`;
   const advanced = (q.face_h_ratio != null || (q.dimensions || []).some(d => d.value != null)) ? `
     <details class="advanced"><summary>Thông tin kỹ thuật</summary>
-      ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
-      ${(q.dimensions || []).map(d => d.value != null ? `<div class="kv"><span class="k">${esc(d.key)}</span><span class="v">${esc(d.value)}</span></div>` : "").join("")}
+      ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio (nguồn)</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
+      ${(pq.dimensions || []).filter(d => d.value != null && typeof d.value !== 'object').map(d => `<div class="kv"><span class="k">${esc(d.key)}</span><span class="v">${esc(d.value)}</span></div>`).join("")}
     </details>` : "";
   modal(`<h2>Đánh giá AI Avatar: ${esc(aid)}</h2>
-    <div class="dim-overall">Chất lượng nguồn: <span class="tag ${qm.cls}">${esc(qm.short || q.quality_status)}</span></div>
+    <div class="dim-overall">A. Chất lượng video nguồn: <span class="tag ${qm.cls}">${esc(qm.short || q.quality_status)}</span></div>
     <div class="hint">Nguồn đánh giá: ${prov}</div>
     <div class="hint">${esc(q.recommendation || "")}</div>
     ${videoInfo}
     ${dimsBlock}
-    <div class="qsection"><div class="qsection-t good">Điểm tốt</div>${strengths || `<div class="muted">—</div>`}</div>
-    <div class="qsection"><div class="qsection-t warn">Điểm cần lưu ý</div>${warns || `<div class="muted">—</div>`}</div>
+    <div class="qsection"><div class="qsection-t good">Điểm tốt (nguồn)</div>${strengths || `<div class="muted">—</div>`}</div>
+    <div class="qsection"><div class="qsection-t warn">Điểm cần lưu ý (nguồn)</div>${warns || `<div class="muted">—</div>`}</div>
+    ${preparedSection}
     ${prodSection}
     ${advanced}
     <div class="actions">
