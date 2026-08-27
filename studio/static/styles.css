@@ -238,6 +238,8 @@ button.tiny{padding:5px 10px;font-size:12px}
 .ac-thumb img{width:100%;height:100%;object-fit:cover}
 .rec-badge{position:absolute;top:8px;left:8px;background:var(--accent);color:#fff;
   font-size:10px;font-weight:700;padding:3px 8px;border-radius:10px;letter-spacing:.04em}
+.rec-badge.partial{background:var(--panel2);color:var(--muted);font-weight:600;
+  border:1px solid var(--border2);max-width:200px;text-align:center}
 .ac-body{padding:12px 14px;display:flex;flex-direction:column;gap:5px}
 .ac-name{font-weight:600;font-size:14px}
 .ac-sub{color:var(--muted);font-size:12px}

@@ -21,7 +21,9 @@ Quality status vs technical status are kept separate:
   quality_status:   RAT_TOT / TOT / CANH_BAO / KHONG_KHUYEN_NGHI / CHUA_CO_DU_LIEU
 """
 import os
+import re
 import json
+import sqlite3
 import subprocess
 from typing import Dict, Any, Optional, List
 
@@ -34,11 +36,53 @@ TOT = "TỐT"
 CANH_BAO = "CẢNH BÁO"
 KHONG_KHUYEN_NGHI = "KHÔNG KHUYẾN NGHỊ"
 CHUA_CO_DU_LIEU = "CHƯA CÓ DỮ LIỆU"
+CHUA_DU_DU_LIEU = "CHƯA ĐỦ DỮ LIỆU"  # partial (e.g. raw source missing)
+
+# Production confidence (from REAL render history — not source quality).
+PROD_CAO = "CAO"
+PROD_TRUNG_BINH = "TRUNG BÌNH"
+PROD_CHUA_KIEM_CHUNG = "CHƯA KIỂM CHỨNG"
 
 # Quality provenance.
-SRC_VALIDATOR = "VALIDATOR"
-SRC_STORED = "STORED_SOURCE_ANALYSIS"
+SRC_VALIDATOR = "RAW_VALIDATOR"
+SRC_PREPARED = "PREPARED_ANALYSIS"
+SRC_HISTORICAL = "HISTORICAL_AUDIT"
 SRC_UNKNOWN = "UNKNOWN"
+
+
+def render_history(avatar_id: str) -> Dict[str, Any]:
+    """Count REAL successful renders for an avatar. Evidence for PRODUCTION
+    CONFIDENCE (kept separate from source quality).
+
+    Sources:
+      * SQLite jobs table (authoritative, exact avatar_id match) — UI jobs.
+      * external render files under D:\\CongThang_AI_Avatar\\renders whose path
+        contains the avatar_id as a distinct token (boundary regex so close_up
+        does NOT match close_up_16_7).
+    Read-only; never counts in-progress/failed jobs as production evidence."""
+    db_complete = 0
+    try:
+        conn = sqlite3.connect(config.DB_PATH)
+        row = conn.execute("SELECT COUNT(*) FROM jobs WHERE avatar_id=? AND status='complete'",
+                           (avatar_id,)).fetchone()
+        db_complete = int(row[0]) if row else 0
+        conn.close()
+    except Exception:
+        pass
+    # external renders (pre-UI production outputs)
+    external = 0
+    rend_root = config.RENDERS_DIR
+    if os.path.isdir(rend_root):
+        pat = re.compile(r"(?<![A-Za-z0-9_])" + re.escape(avatar_id) + r"(?![A-Za-z0-9_])")
+        for root, _dirs, files in os.walk(rend_root):
+            for f in files:
+                if f.lower().endswith(".mp4"):
+                    if pat.search(os.path.join(root, f)):
+                        external += 1
+    total = db_complete + external
+    conf = (PROD_CAO if total >= 2 else PROD_TRUNG_BINH if total >= 1 else PROD_CHUA_KIEM_CHUNG)
+    return {"db_complete": db_complete, "external": external, "total": total,
+            "production_confidence": conf}
 
 
 def resolve_raw_source(avatar_id: str) -> Optional[str]:
@@ -268,6 +312,7 @@ def build_quality(avatar_id: str, vresult: Dict[str, Any],
 
     integrity = vresult.get("integrity", {}) or {}
     overall = _overall_level(dimensions, face_h)
+    rh = render_history(avatar_id)
     return {
         "avatar_id": avatar_id,
         "quality_status": overall,
@@ -279,6 +324,8 @@ def build_quality(avatar_id: str, vresult: Dict[str, Any],
         "strengths": strengths,
         "warnings": warnings,
         "recommendation": _recommendation(overall, warnings),
+        "production_confidence": rh["production_confidence"],
+        "render_history": rh,
         "video": {
             "width": integrity.get("width"),
             "height": integrity.get("height"),
@@ -291,9 +338,12 @@ def build_quality(avatar_id: str, vresult: Dict[str, Any],
 
 
 def _no_data_quality(avatar_id: str, source_path: Optional[str]) -> Dict[str, Any]:
+    rh = render_history(avatar_id)
+    # Source unknown, but production confidence may be high if real renders exist.
+    has_renders = rh["total"] >= 1
     return {
         "avatar_id": avatar_id,
-        "quality_status": CHUA_CO_DU_LIEU,
+        "quality_status": CHUA_DU_DU_LIEU if has_renders else CHUA_CO_DU_LIEU,
         "quality_source": SRC_UNKNOWN,
         "source_path": source_path,
         "source_exists": bool(source_path),
@@ -301,7 +351,12 @@ def _no_data_quality(avatar_id: str, source_path: Optional[str]) -> Dict[str, An
         "dimensions": [],
         "strengths": [],
         "warnings": [],
-        "recommendation": "Chưa có đủ dữ liệu để đánh giá chất lượng nguồn.",
+        "recommendation": ("Video nguồn gốc không còn — chưa đánh giá được chất "
+                           "lượng nguồn. Đã có render thực tế (xem độ tin cậy "
+                           "production)." if has_renders
+                           else "Chưa có đủ dữ liệu để đánh giá chất lượng nguồn."),
+        "production_confidence": rh["production_confidence"],
+        "render_history": rh,
         "video": {},
     }
 
@@ -365,6 +420,16 @@ def _store_quality(avatar_id: str, q: Dict[str, Any]) -> None:
                      quality_data=json.dumps(q, ensure_ascii=False))
 
 
+def production_confidence_for_list(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Compact production-confidence info for the library card (from real
+    render history, separate from source quality)."""
+    if not q:
+        return {"production_confidence": PROD_CHUA_KIEM_CHUNG, "render_count": 0}
+    rh = q.get("render_history") or {}
+    return {"production_confidence": q.get("production_confidence", PROD_CHUA_KIEM_CHUNG),
+            "render_count": rh.get("total", 0)}
+
+
 def evaluate_all(force: bool = False) -> Dict[str, Any]:
     """Backfill: evaluate every prepared avatar with an on-disk source.
     Read-only. Returns a summary. Does not touch incomplete avatars' quality."""
@@ -384,11 +449,14 @@ def quality_summary_for_list(q: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """Compact quality info for the library card list (no big payload)."""
     if not q:
         return {"quality_status": CHUA_CO_DU_LIEU, "strengths": [], "warnings": [],
-                "quality_source": SRC_UNKNOWN, "face_h_ratio": None}
+                "quality_source": SRC_UNKNOWN, "face_h_ratio": None,
+                "production_confidence": PROD_CHUA_KIEM_CHUNG, "render_count": 0}
     return {
         "quality_status": q.get("quality_status", CHUA_CO_DU_LIEU),
         "strengths": (q.get("strengths") or [])[:4],
         "warnings": (q.get("warnings") or [])[:4],
         "quality_source": q.get("quality_source", SRC_UNKNOWN),
         "face_h_ratio": q.get("face_h_ratio"),
+        "production_confidence": q.get("production_confidence", PROD_CHUA_KIEM_CHUNG),
+        "render_count": (q.get("render_history") or {}).get("total", 0),
     }

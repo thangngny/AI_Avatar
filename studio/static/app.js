@@ -38,13 +38,20 @@ const TYPE_VI = { "Close Up": "Cận cảnh", "Full Body": "Toàn thân", Unknow
 
 // Quality level → {label, css class, rank}.
 const QLEVEL = {
-  "RẤT TỐT": { cls: "accent", rank: 4, short: "Rất tốt" },
-  "TỐT": { cls: "good", rank: 3, short: "Tốt" },
+  "RẤT TỐT": { cls: "accent", rank: 5, short: "Rất tốt" },
+  "TỐT": { cls: "good", rank: 4, short: "Tốt" },
   "CẢNH BÁO": { cls: "warn", rank: 2, short: "Cảnh báo" },
   "KHÔNG KHUYẾN NGHỊ": { cls: "bad", rank: 1, short: "Không khuyến nghị" },
+  "CHƯA ĐỦ DỮ LIỆU": { cls: "muted", rank: 0, short: "Chưa đủ dữ liệu" },
   "CHƯA CÓ DỮ LIỆU": { cls: "muted", rank: 0, short: "Chưa có dữ liệu" },
 };
 const qMeta = (q) => QLEVEL[q] || QLEVEL["CHƯA CÓ DỮ LIỆU"];
+// Production confidence (from REAL render history — separate from source quality).
+const PROD_VI = {
+  "CAO": { cls: "good", short: "Production: cao" },
+  "TRUNG BÌNH": { cls: "warn", short: "Production: trung bình" },
+  "CHƯA KIỂM CHỨNG": { cls: "muted", short: "Chưa kiểm chứng" },
+};
 
 // Tiny localStorage helpers.
 const ls = {
@@ -418,9 +425,9 @@ async function renderLibrary() {
   const avs = state.avatars;
   // compute real counts
   const ready = avs.filter(a => a.ready).length;
-  const counts = { "RẤT TỐT": 0, "TỐT": 0, "CẢNH BÁO": 0, "KHÔNG KHUYẾN NGHỊ": 0, "CHƯA CÓ DỮ LIỆU": 0 };
-  let incomplete = 0;
-  avs.forEach(a => { if (!a.ready) incomplete++; else counts[a.quality_status || "CHƯA CÓ DỮ LIỆU"]++; });
+  const counts = { "RẤT TỐT": 0, "TỐT": 0, "CẢNH BÁO": 0, "KHÔNG KHUYẾN NGHỊ": 0, "CHƯA CÓ DỮ LIỆU": 0, "CHƯA ĐỦ DỮ LIỆU": 0 };
+  let incomplete = 0, verified = 0;
+  avs.forEach(a => { if (!a.ready) incomplete++; else { counts[a.quality_status || "CHƯA CÓ DỮ LIỆU"]++; if (a.render_count > 0) verified++; } });
   el.innerHTML = `
     <h1 class="view-title">Thư viện AI Avatar</h1>
     <p class="view-sub">${ready} AI Avatar sẵn sàng${incomplete ? ` · ${incomplete} chưa hoàn tất` : ""}</p>
@@ -430,7 +437,8 @@ async function renderLibrary() {
       ${counts["TỐT"] ? `<span class="good"><b>${counts["TỐT"]}</b> tốt</span>` : ""}
       ${counts["CẢNH BÁO"] ? `<span class="warn"><b>${counts["CẢNH BÁO"]}</b> có cảnh báo</span>` : ""}
       ${counts["KHÔNG KHUYẾN NGHỊ"] ? `<span class="bad"><b>${counts["KHÔNG KHUYẾN NGHỊ"]}</b> không khuyến nghị</span>` : ""}
-      ${counts["CHƯA CÓ DỮ LIỆU"] ? `<span class="muted"><b>${counts["CHƯA CÓ DỮ LIỆU"]}</b> chưa có dữ liệu</span>` : ""}
+      ${(counts["CHƯA CÓ DỮ LIỆU"]+counts["CHƯA ĐỦ DỮ LIỆU"]) ? `<span class="muted"><b>${counts["CHƯA CÓ DỮ LIỆU"]+counts["CHƯA ĐỦ DỮ LIỆU"]}</b> chưa đủ dữ liệu nguồn</span>` : ""}
+      ${verified ? `<span class="good"><b>${verified}</b> đã kiểm chứng production</span>` : ""}
       ${incomplete ? `<span class="bad"><b>${incomplete}</b> chưa hoàn tất</span>` : ""}
     </div>
     <div class="lib-controls">
@@ -478,22 +486,38 @@ function renderLibGrid() {
   if (state.libSort === "quality") list.sort((a, b) => (qMeta(b.quality_status).rank - qMeta(a.quality_status).rank) || (b.ready - a.ready));
   else if (state.libSort === "name") list.sort((a, b) => a.avatar_id.localeCompare(b.avatar_id));
   else if (state.libSort === "newest") list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
-  // recommended: strongest READY with real quality data
-  const recCands = list.filter(a => a.ready && ["RẤT TỐT", "TỐT"].includes(a.quality_status));
-  const recId = recCands.length ? recCands.sort((a, b) => qMeta(b.quality_status).rank - qMeta(a.quality_status).rank
-    || (b.face_h_ratio || 0) - (a.face_h_ratio || 0))[0].avatar_id : null;
-  grid.innerHTML = list.map(a => libraryCardHTML(a, a.avatar_id === recId)).join("")
+  // recommended: only a GLOBAL recommendation when ALL ready avatars have real
+  // source-quality data. If some ready avatars lack quality data, the best
+  // evaluated one gets "TỐT NHẤT TRONG NHÓM ĐÃ ĐÁNH GIÁ" — never a global ★.
+  const readyAll = state.avatars.filter(a => a.ready);
+  const readyWithQuality = readyAll.filter(a => ["RẤT TỐT", "TỐT", "CẢNH BÁO", "KHÔNG KHUYẾN NGHỊ"].includes(a.quality_status));
+  const allHaveData = readyAll.length > 0 && readyWithQuality.length === readyAll.length;
+  const recCands = readyWithQuality.filter(a => ["RẤT TỐT", "TỐT"].includes(a.quality_status));
+  let recId = null, recKind = "";
+  if (recCands.length) {
+    recId = recCands.sort((a, b) => qMeta(b.quality_status).rank - qMeta(a.quality_status).rank
+      || (b.face_h_ratio || 0) - (a.face_h_ratio || 0))[0].avatar_id;
+    recKind = allHaveData ? "global" : "partial";
+  }
+  grid.innerHTML = list.map(a => libraryCardHTML(a, a.avatar_id === recId, recKind)).join("")
     || `<div class="empty"><div class="big">📁</div>Không có AI Avatar phù hợp.</div>`;
 }
-function libraryCardHTML(a, recommended) {
+function libraryCardHTML(a, recommended, recKind) {
   const q = a.quality_status || "CHƯA CÓ DỮ LIỆU";
   const qm = qMeta(q);
   const techBadge = a.ready
     ? `<span class="tag good">SẴN SÀNG</span>`
     : `<span class="tag bad">CHƯA HOÀN TẤT</span>`;
+  const prod = PROD_VI[a.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
+  const prodBadge = a.ready && a.render_count > 0
+    ? `<span class="tag ${prod.cls}" title="${a.render_count} render thực tế">Đã kiểm chứng (${a.render_count})</span>` : "";
   const strengths = (a.quality_strengths || []).slice(0, 3).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
   const warns = (a.quality_warnings || []).slice(0, 2).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
-  const rec = recommended ? `<div class="rec-badge">★ KHUYẾN NGHỊ</div>` : "";
+  let rec = "";
+  if (recommended) {
+    if (recKind === "global") rec = `<div class="rec-badge">★ KHUYẾN NGHỊ</div>`;
+    else rec = `<div class="rec-badge partial">TỐT NHẤT TRONG NHÓM ĐÃ ĐÁNH GIÁ</div>`;
+  }
   const useBtn = a.ready
     ? `<button class="primary" onclick="useAvatar('${esc(a.avatar_id)}')">Sử dụng Avatar</button>`
     : `<button class="primary" disabled title="Chưa hoàn tất">Sử dụng Avatar</button>`;
@@ -507,7 +531,7 @@ function libraryCardHTML(a, recommended) {
     <div class="ac-body">
       <div class="ac-name">${esc(a.avatar_id)}</div>
       <div class="ac-sub">${esc(TYPE_VI[a.avatar_type] || a.avatar_type || "Không rõ")}</div>
-      <div class="ac-tags">${techBadge} <span class="tag ${qm.cls}">${esc(qm.short)}</span></div>
+      <div class="ac-tags">${techBadge} <span class="tag ${qm.cls}">${esc(qm.short)}</span> ${prodBadge}</div>
       ${strengths}${warns}
       ${!a.ready ? `<div class="qs muted">AI Avatar này thiếu dữ liệu cần thiết, chưa thể render.</div>` : ""}
       <div class="ac-actions">
@@ -558,18 +582,27 @@ function renderQualityModal(aid, q) {
   const warns = (q.warnings || []).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
   const v = q.video || {};
   const videoInfo = v.width ? `<div class="hint">Video nguồn: ${v.width}×${v.height} · ${v.fps} FPS · ${v.duration} giây</div>` : "";
-  const advanced = q.face_h_ratio != null ? `
+  const provMap = { "RAW_VALIDATOR": "Đánh giá từ video nguồn (validator)", "PREPARED_ANALYSIS": "Phân tích từ dữ liệu đã chuẩn bị", "HISTORICAL_AUDIT": "Báo cáo kiểm chứng cũ", "UNKNOWN": "Chưa rõ nguồn đánh giá" };
+  const prov = provMap[q.quality_source] || "Chưa rõ";
+  const rh = q.render_history || {};
+  const prod = PROD_VI[q.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
+  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">Độ tin cậy production (từ render thực tế)</div>
+    <div class="hint">${q.production_confidence === "CHƯA KIỂM CHỨNG" ? "Chưa có render thực tế nào được ghi nhận." : `Đã có ${rh.total||0} render hoàn tất (DB: ${rh.db_complete||0}, file: ${rh.external||0}).`}</div></div>`;
+  const dimsBlock = dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn (video nguồn gốc không còn).</div>`;
+  const advanced = (q.face_h_ratio != null || (q.dimensions || []).some(d => d.value != null)) ? `
     <details class="advanced"><summary>Thông tin kỹ thuật</summary>
-      <div class="kv"><span class="k">face_h_ratio</span><span class="v">${q.face_h_ratio}</span></div>
+      ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
       ${(q.dimensions || []).map(d => d.value != null ? `<div class="kv"><span class="k">${esc(d.key)}</span><span class="v">${esc(d.value)}</span></div>` : "").join("")}
     </details>` : "";
   modal(`<h2>Đánh giá AI Avatar: ${esc(aid)}</h2>
-    <div class="dim-overall">Chất lượng tổng thể: <span class="tag ${qm.cls}">${esc(qm.short || q.quality_status)}</span></div>
+    <div class="dim-overall">Chất lượng nguồn: <span class="tag ${qm.cls}">${esc(qm.short || q.quality_status)}</span></div>
+    <div class="hint">Nguồn đánh giá: ${prov}</div>
     <div class="hint">${esc(q.recommendation || "")}</div>
     ${videoInfo}
-    <div class="dims">${dims}</div>
+    ${dimsBlock}
     <div class="qsection"><div class="qsection-t good">Điểm tốt</div>${strengths || `<div class="muted">—</div>`}</div>
     <div class="qsection"><div class="qsection-t warn">Điểm cần lưu ý</div>${warns || `<div class="muted">—</div>`}</div>
+    ${prodSection}
     ${advanced}
     <div class="actions">
       <button class="primary" onclick="useAvatarFromModal('${esc(aid)}')">Sử dụng AI Avatar</button>

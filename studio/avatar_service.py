@@ -175,6 +175,8 @@ def list_avatars() -> List[Dict[str, Any]]:
         item["quality_warnings"] = qsum["warnings"]
         item["quality_source"] = qsum["quality_source"]
         item["face_h_ratio"] = qsum["face_h_ratio"]
+        item["production_confidence"] = qsum["production_confidence"]
+        item["render_count"] = qsum["render_count"]
         out.append(item)
     return out
 
