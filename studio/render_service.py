@@ -29,10 +29,32 @@ from typing import Dict, Any, List, Optional
 
 from . import config, db, gpu_service
 from . import elevenlabs_client as el
+from . import edge_tts_client as edge
 from . import avatar_service
 from . import verify as verify_mod
 from . import runtime
 from .avatar_service import _torch_python
+
+
+# --------------------------------------------------------------------------- #
+# TTS providers (spec Part B/D) — EXPLICIT, never fallback                    #
+# --------------------------------------------------------------------------- #
+ELEVENLABS = "ELEVENLABS"
+EDGE_TTS_TEST = "EDGE_TTS_TEST"
+
+# Test type taxonomy (spec Part D / B11).
+TEST_TYPE_STANDARD_MOUTH = "STANDARD_MOUTH_TEST"
+TEST_TYPE_SCRIPT_PREVIEW = "SCRIPT_PREVIEW"
+TEST_TYPE_PRODUCTION = "PRODUCTION"
+
+# Standardized Vietnamese mouth-motion diagnostic script (spec B10). A
+# repeatable visual test stimulus: bilabials (m/b/p), wide/open + rounded
+# vowels, natural sentence flow. The renderer is NOT optimized for this — it
+# only makes Avatar A vs Avatar B comparable under identical text/voice/profile.
+STANDARD_MOUTH_TEST_SCRIPT = (
+    "Ba mẹ mỉm cười và Minh mua một hộp bánh mì. "
+    "Phương nói hôm nay trời đẹp, chúng ta cùng quay video thật tự nhiên."
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -74,33 +96,66 @@ def truth_hash() -> str:
 
 
 # --------------------------------------------------------------------------- #
-# Master audio (reuse for same script+voice)                                 #
+# Master audio (reuse for same script+voice+provider)                        #
 # --------------------------------------------------------------------------- #
-def _master_key(script_text: str, voice_id: str) -> str:
-    h = hashlib.sha1((script_text + "||" + voice_id).encode("utf-8")).hexdigest()
+def _master_key(script_text: str, voice_id: str, tts_provider: str) -> str:
+    h = hashlib.sha1((script_text + "||" + voice_id + "||" + tts_provider).encode("utf-8")).hexdigest()
     return h[:24]
 
 
-def _master_path(script_text: str, voice_id: str) -> str:
+def _master_path(script_text: str, voice_id: str, tts_provider: str) -> str:
     os.makedirs(os.path.join(config.TEMP_DIR, "master"), exist_ok=True)
-    return os.path.join(config.TEMP_DIR, "master", f"{_master_key(script_text, voice_id)}_{voice_id}.wav")
+    return os.path.join(config.TEMP_DIR, "master", f"{_master_key(script_text, voice_id, tts_provider)}_{tts_provider}_{voice_id}.wav")
 
 
 def generate_master_audio(script_text: str, voice_id: str,
-                           target_sec: Optional[float] = None) -> Dict[str, Any]:
-    """Generate ONE master audio for a script part + voice. Reused across
-    avatars (same text+voice -> same file). Fail-closed: never falls back to a
-    different voice. Returns {ok, path, duration_sec}."""
+                           target_sec: Optional[float] = None,
+                           tts_provider: str = ELEVENLABS) -> Dict[str, Any]:
+    """Generate ONE canonical master audio (16 kHz mono FLOAT wav) for a script
+    part + voice + provider. Reused across avatars (same text+voice+provider ->
+    same file). Both providers feed the SAME production renderer afterward.
+
+    Providers are EXPLICIT and never fall back to each other (spec B8):
+      ELEVENLABS     -> elevenlabs_client.synth_to_wav (exact voice_id, fail-closed)
+      EDGE_TTS_TEST  -> edge_tts_client.synth_to_wav (no API key, no quota)
+
+    Returns {ok, path, duration_sec}."""
     text = (script_text or "").strip()
     if not text:
         return {"ok": False, "error": "Empty script — nothing to synthesize."}
     if not voice_id:
-        return {"ok": False, "error": "No Voice ID provided."}
+        return {"ok": False, "error": "No voice provided."}
+
+    if tts_provider == EDGE_TTS_TEST:
+        if not edge.is_available():
+            return {"ok": False, "error": "Giọng test miễn phí (Edge TTS) hiện không khả dụng."}
+        out = _master_path(text, voice_id, tts_provider)
+        if os.path.exists(out) and os.path.getsize(out) > 1000:
+            try:
+                import soundfile as sf
+                info = sf.info(out)
+                return {"ok": True, "path": out, "duration_sec": float(info.duration),
+                        "reused": True}
+            except Exception:
+                pass
+        if target_sec:
+            words = text.split()
+            target_words = max(1, int(target_sec * config.WORDS_PER_SEC))
+            text = " ".join(words[:target_words])
+            if not text:
+                return {"ok": False, "error": "Script too short for a test render."}
+        try:
+            path, dur = edge.synth_to_wav(voice_id, text, out)
+        except edge.EdgeTTSUnavailable as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"Edge TTS failed: {e}"}
+        return {"ok": True, "path": path, "duration_sec": dur, "reused": False}
+
+    # Default / ELEVENLABS — production path, unchanged.
     if not el.is_configured():
         return {"ok": False, "error": "ElevenLabs API key not configured."}
-
-    out = _master_path(text, voice_id)
-    # Reuse an existing non-trivial master (same text+voice => identical audio).
+    out = _master_path(text, voice_id, tts_provider)
     if os.path.exists(out) and os.path.getsize(out) > 1000:
         try:
             import soundfile as sf
@@ -109,7 +164,6 @@ def generate_master_audio(script_text: str, voice_id: str,
                     "reused": True}
         except Exception:
             pass
-
     if target_sec:
         # Test render: trim by words, no mid-word cut.
         words = text.split()
@@ -117,7 +171,6 @@ def generate_master_audio(script_text: str, voice_id: str,
         text = " ".join(words[:target_words])
         if not text:
             return {"ok": False, "error": "Script too short for a test render."}
-
     try:
         path, dur = el.synth_to_wav(voice_id, text, out)
     except el.VoiceError as e:
@@ -175,15 +228,29 @@ def _output_path(kind: str, avatar_id: str, label: str,
     return path
 
 
+def _provider_for(tts_provider: Optional[str]) -> str:
+    """Normalize an incoming tts_provider to a known value (default ELEVENLABS).
+    Unknown values default to ELEVENLABS so a malformed request can never
+    accidentally route to the free path."""
+    return EDGE_TTS_TEST if tts_provider == EDGE_TTS_TEST else ELEVENLABS
+
+
 def create_test_job(avatar_id: str, voice_id: str, script_text: str,
-                    voice_meta: Optional[Dict] = None) -> Dict[str, Any]:
-    """Create a 10-second test render job (SAME production quality as full)."""
+                    voice_meta: Optional[Dict] = None,
+                    tts_provider: str = ELEVENLABS,
+                    test_mode: bool = False,
+                    test_type: Optional[str] = None) -> Dict[str, Any]:
+    """Create a 10-second test render job (SAME production quality as full).
+
+    tts_provider selects the voice source (ELEVENLABS / EDGE_TTS_TEST). Both
+    feed the same locked production renderer; only the audio source differs."""
+    provider = _provider_for(tts_provider)
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
     if not match or not match["ready"]:
         return {"ok": False, "error": f"Avatar '{avatar_id}' is not READY."}
     if not voice_id:
-        return {"ok": False, "error": "No Voice ID provided."}
+        return {"ok": False, "error": "No voice provided."}
     if not (script_text or "").strip():
         return {"ok": False, "error": "Script is empty."}
 
@@ -196,6 +263,44 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         "script_segment": json.dumps({"mode": "test10s", "target_sec": 10}, ensure_ascii=False),
         "output_path": out, "status": "queued", "stage": "Queued",
         "truth_hash": truth_hash(),
+        "tts_provider": provider, "test_mode": 1 if test_mode else 0,
+        "test_type": test_type or (TEST_TYPE_SCRIPT_PREVIEW if test_mode else None),
+        "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
+    })
+    _wake_worker()
+    return {"ok": True, "job_id": job_id}
+
+
+def create_mouth_test_job(avatar_id: str, edge_voice: str,
+                          script_text: Optional[str] = None) -> Dict[str, Any]:
+    """Create a STANDARD MOUTH TEST render job using the FREE Edge TTS voice
+    (spec B9/B10/B11). 8–12 seconds, LOCKED production lipsync profile, no
+    ElevenLabs quota consumed. Uses the standardized Vietnamese diagnostic
+    script by default so Avatar A vs Avatar B is comparable under identical
+    text/voice/profile. Never falls back to ElevenLabs."""
+    provider = EDGE_TTS_TEST
+    av = avatar_service.list_avatars()
+    match = next((a for a in av if a["avatar_id"] == avatar_id), None)
+    if not match or not match["ready"]:
+        return {"ok": False, "error": f"Avatar '{avatar_id}' is not READY."}
+    voice = (edge_voice or edge.DEFAULT_VOICE).strip() or edge.DEFAULT_VOICE
+    text = (script_text or "").strip() or STANDARD_MOUTH_TEST_SCRIPT
+
+    job_id = _new_job_id()
+    out = _output_path("mouhtest", avatar_id, "mouthtest", job_id)
+    db.create_job({
+        "job_id": job_id, "kind": "mouhtest", "avatar_id": avatar_id,
+        "voice_id": voice, "voice_meta": json.dumps(
+            {"provider": "edge_tts", "voice_label": edge.voice_label(voice)},
+            ensure_ascii=False),
+        "script_text": text[:8000], "script_name": "mouthtest",
+        "script_segment": json.dumps({"mode": "mouthtest", "target_sec": 10,
+                                       "standard_script": (script_text or "").strip() == ""},
+                                      ensure_ascii=False),
+        "output_path": out, "status": "queued", "stage": "Queued",
+        "truth_hash": truth_hash(),
+        "tts_provider": provider, "test_mode": 1,
+        "test_type": TEST_TYPE_STANDARD_MOUTH, "edge_voice": voice,
     })
     _wake_worker()
     return {"ok": True, "job_id": job_id}
@@ -203,15 +308,17 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
 
 def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
                      split_mode: str = "full",
-                     voice_meta: Optional[Dict] = None) -> Dict[str, Any]:
+                     voice_meta: Optional[Dict] = None,
+                     tts_provider: str = ELEVENLABS) -> Dict[str, Any]:
     """Create one or more full-render jobs (one per script part)."""
+    provider = _provider_for(tts_provider)
     from . import script_service
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
     if not match or not match["ready"]:
         return {"ok": False, "error": f"Avatar '{avatar_id}' is not READY."}
     if not voice_id:
-        return {"ok": False, "error": "No Voice ID provided."}
+        return {"ok": False, "error": "No voice provided."}
     if not (script_text or "").strip():
         return {"ok": False, "error": "Script is empty."}
 
@@ -233,6 +340,9 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
                                           ensure_ascii=False),
             "output_path": out, "status": "queued", "stage": "Queued",
             "truth_hash": truth_hash(),
+            "tts_provider": provider, "test_mode": 0,
+            "test_type": TEST_TYPE_PRODUCTION,
+            "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
         })
         job_ids.append(job_id)
     _wake_worker()
@@ -372,10 +482,13 @@ def _run_job(job_id: str, gpu_id: int) -> None:
     log_path = os.path.join(config.LOG_DIR, f"{job_id}.log")
     db.update_job(job_id, gpu_id=gpu_id, log_path=log_path, stage="Preparing audio")
 
-    # 1) Generate master audio (EXACT voice_id, fail-closed).
-    target_sec = 10.0 if job["kind"] == "test10s" else None
+    # 1) Generate master audio. Provider is EXPLICIT per job (ELEVENLABS or
+    #    EDGE_TTS_TEST); never falls back between providers (spec B8). Both feed
+    #    the same locked production renderer. test10s / mouhtest -> ~10s trim.
+    provider = job.get("tts_provider") or ELEVENLABS
+    target_sec = 10.0 if job["kind"] in ("test10s", "mouhtest") else None
     audio = generate_master_audio(job["script_text"], job["voice_id"],
-                                  target_sec=target_sec)
+                                  target_sec=target_sec, tts_provider=provider)
     if not audio["ok"]:
         db.update_job(job_id, status="failed", stage="Failed", error=audio["error"])
         gpu_service.release(gpu_id)

@@ -23,6 +23,7 @@ from . import avatar_quality
 from . import script_service
 from . import render_service
 from . import elevenlabs_client as el
+from . import edge_tts_client as edge
 
 app = Flask(__name__, static_folder=None)
 app.config["JSON_AS_ASCII"] = False
@@ -81,6 +82,7 @@ def system_status():
         "renderer_ready": os.path.exists(config.RENDERER),
         "musetalk_ready": os.path.isdir(os.path.join(config.ROOT, "models", "musetalkV15")),
         "elevenlabs_connected": el.is_configured(),
+        "edge_tts_available": edge.is_available(),
         "elevenlabs_key_masked": envutil.mask_api_key(),
         "gpus": gpus,
         "gpu_count": len(gpus),
@@ -171,17 +173,29 @@ def prepare_avatar():
     if not name:
         return jsonify({"ok": False, "error": "Avatar name is required."}), 400
     res = avatar_service.prepare_avatar(video_path, name, override)
-    # Persist quality/override for future debugging.
+    # Persist quality/override/mouth-state for future debugging. Mouth state is
+    # stored SEPARATELY and never overwrites the raw automated evidence (spec A10):
+    #   mouth_state_auto        — raw automated evidence (validator SOURCE_MOUTH_STATE)
+    #   mouth_state_user        — user-confirmed: 'NOT_TALKING'|'TALKING'|'UNSURE'
+    #   mouth_state_provenance  — 'AUTO'|'USER_CONFIRMED'|'UNKNOWN'
     if res.get("ok"):
         quality = data.get("quality_result")
         warnings = data.get("quality_warnings")
+        mouth_user = (data.get("mouth_state_user") or "").strip()
+        mouth_auto = data.get("mouth_state_auto")
+        provenance = (data.get("mouth_state_provenance")
+                      or ("USER_CONFIRMED" if mouth_user else "UNKNOWN"))
+        qd = {"quality_result": quality,
+              "quality_warnings": warnings,
+              "user_override": override,
+              "mouth_state_auto": mouth_auto,
+              "mouth_state_user": mouth_user or None,
+              "mouth_state_provenance": provenance}
         db.upsert_avatar(res["avatar_id"], name=name,
                          ready=0,
                          quality=(data.get("overall") or ("WARN" if warnings else "PASS")),
-                         quality_data=json.dumps({"quality_result": quality,
-                                                   "quality_warnings": warnings,
-                                                   "user_override": override},
-                                                  ensure_ascii=False) if quality or warnings else None,
+                         quality_data=json.dumps(qd, ensure_ascii=False)
+                         if (quality or warnings or mouth_user) else None,
                          source_video=video_path,
                          created_at=time.time())
     return jsonify(res)
@@ -210,6 +224,44 @@ def list_source():
                 out.append({"name": f, "path": p,
                             "size": os.path.getsize(p)})
     return jsonify({"sources": out})
+
+
+@app.route("/api/avatar/sample")
+def avatar_sample():
+    """Report whether a COMPLIANT raw-source sample video is available for the
+    guided Create Avatar flow (spec A7/A8/H).
+
+    A sample is eligible only if a human-approved compliant MP4 exists under
+    studio/static/assets/avatar_source_example/. Known talking sources (e.g.
+    test17_8/Close Up.mp4) are explicitly NOT used as the ideal-source example.
+    If no approved sample exists, returns status='SAMPLE_ASSET_PENDING_HUMAN_APPROVAL'
+    with the schematic framing guide fallback — never fabricates a real-person
+    sample. The UI shows 'Video mẫu chuẩn đang được cập nhật.' in that case."""
+    sample_dir = os.path.join(STATIC_DIR, "assets", "avatar_source_example")
+    sample_path = os.path.join(sample_dir, "sample.mp4")
+    manifest_path = os.path.join(sample_dir, "manifest.json")
+    if os.path.isfile(sample_path) and os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            if manifest.get("approved"):
+                return jsonify({
+                    "status": "REAL_COMPLIANT_SOURCE",
+                    "available": True,
+                    "url": "/assets/avatar_source_example/sample.mp4",
+                    "why_eligible": manifest.get("why_eligible", ""),
+                    "source_path": manifest.get("source_path", ""),
+                    "checks": manifest.get("checks", []),
+                })
+        except Exception:
+            pass
+    return jsonify({
+        "status": "SAMPLE_ASSET_PENDING_HUMAN_APPROVAL",
+        "available": False,
+        "message": "Video mẫu chuẩn đang được cập nhật.",
+        "note": "A human-approved compliant raw-source MP4 + manifest.json is "
+                "required under studio/static/assets/avatar_source_example/.",
+    })
 
 
 def _receive_video(field: str) -> str:
@@ -302,6 +354,39 @@ def voice_preview_file(name):
 
 
 # --------------------------------------------------------------------------- #
+# Voice — Edge TTS free test provider (spec Part B)                          #
+# --------------------------------------------------------------------------- #
+@app.route("/api/voice/edge/voices")
+def edge_voices():
+    """List available Vietnamese Edge TTS voices (dynamic, with known-voice
+    fallback). No API key. Never calls ElevenLabs."""
+    return jsonify(edge.list_voices())
+
+
+@app.route("/api/voice/edge/preview", methods=["POST"])
+def edge_preview():
+    """Generate a short Edge TTS preview clip. No ElevenLabs quota consumed.
+    Only the test text is sent to the Edge TTS online service (spec Part I)."""
+    data = request.get_json(silent=True) or {}
+    voice = (data.get("voice_id") or data.get("edge_voice") or edge.DEFAULT_VOICE).strip()
+    text = data.get("script_text") or data.get("text") or ""
+    if not text.strip():
+        return jsonify({"ok": False, "error": "No script to preview."}), 400
+    os.makedirs(config.TEMP_DIR, exist_ok=True)
+    out = os.path.join(config.TEMP_DIR, f"preview_edge_{int(time.time())}_{abs(hash(voice))%100000}.wav")
+    try:
+        path, dur = edge.preview_voice(voice, text, out)
+    except edge.EdgeTTSUnavailable as e:
+        # Explicit failure — never silently fall back to ElevenLabs.
+        return jsonify({"ok": False, "error": str(e)}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Edge TTS preview failed: {e}"}), 500
+    return jsonify({"ok": True, "path": path, "duration_sec": dur,
+                    "voice_id": voice, "voice_label": edge.voice_label(voice),
+                    "preview_url": f"/api/voice/preview/file/{os.path.basename(path)}"})
+
+
+# --------------------------------------------------------------------------- #
 # Script                                                                      #
 # --------------------------------------------------------------------------- #
 @app.route("/api/script/parse", methods=["POST"])
@@ -341,7 +426,24 @@ def render_test():
     data = request.get_json(silent=True) or {}
     return jsonify(render_service.create_test_job(
         data.get("avatar_id", ""), data.get("voice_id", ""),
-        data.get("script_text", ""), data.get("voice_meta")))
+        data.get("script_text", ""), data.get("voice_meta"),
+        tts_provider=data.get("tts_provider", render_service.ELEVENLABS),
+        test_mode=bool(data.get("test_mode", False)),
+        test_type=data.get("test_type")))
+
+
+@app.route("/api/render/mouth-test", methods=["POST"])
+def render_mouth_test():
+    """Standard mouth-motion test via the FREE Edge TTS voice (spec B9/B10).
+    No ElevenLabs quota. LOCKED production lipsync profile. Uses the standard
+    diagnostic script unless the caller supplies its own text."""
+    data = request.get_json(silent=True) or {}
+    avatar_id = (data.get("avatar_id") or "").strip()
+    edge_voice = (data.get("edge_voice") or data.get("voice_id") or "").strip()
+    script_text = data.get("script_text") or ""
+    if not avatar_id:
+        return jsonify({"ok": False, "error": "Chọn AI Avatar trước."}), 400
+    return jsonify(render_service.create_mouth_test_job(avatar_id, edge_voice, script_text))
 
 
 @app.route("/api/render", methods=["POST"])
@@ -350,7 +452,8 @@ def render_full():
     return jsonify(render_service.create_full_jobs(
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("split_mode", "full"),
-        data.get("voice_meta")))
+        data.get("voice_meta"),
+        tts_provider=data.get("tts_provider", render_service.ELEVENLABS)))
 
 
 @app.route("/api/render/jobs")
@@ -430,6 +533,8 @@ def settings_get():
         "elevenlabs_connected": el.is_configured(),
         "elevenlabs_key_masked": envutil.mask_api_key(),
         "elevenlabs_model_id": el.model_id(),
+        "edge_tts_available": edge.is_available(),
+        "edge_tts_default_voice": edge.DEFAULT_VOICE,
         "renders_dir": config.RENDERS_DIR,
     })
 

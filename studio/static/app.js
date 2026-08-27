@@ -64,7 +64,18 @@ const state = {
   scriptText: "", scriptInfo: null, voiceId: "", voiceMeta: null, voiceChecked: false,
   splitMode: "full", prepState: null, jobFilter: "all",
   libFilter: "all", libSort: "quality", libSearch: "",
+  // TTS provider: "elevenlabs" (production) | "edge" (free test). Explicit,
+  // never silently switched. Edge path consumes NO ElevenLabs quota.
+  ttsProvider: "elevenlabs", edgeVoices: [], edgeVoice: "vi-VN-HoaiMyNeural",
 };
+
+// Standardized Vietnamese mouth-motion diagnostic script (spec B10). A
+// repeatable visual test stimulus — bilabials (m/b/p), wide/open + rounded
+// vowels, natural flow. The renderer is NOT optimized for this; it only makes
+// Avatar A vs Avatar B comparable under identical text/voice/profile.
+const STANDARD_MOUTH_TEST_SCRIPT =
+  "Ba mẹ mỉm cười và Minh mua một hộp bánh mì. " +
+  "Phương nói hôm nay trời đẹp, chúng ta cùng quay video thật tự nhiên.";
 
 // --------------------------------------------------------------------------- //
 async function loadStatus() {
@@ -146,14 +157,13 @@ async function renderQuick() {
     </div>
 
     <div class="card">
-      <h2>ElevenLabs Voice ID</h2>
-      <label>Copy Voice ID từ ElevenLabs và dán vào đây — ghi nhớ trên máy này</label>
-      <div class="row">
-        <input id="qVoice" placeholder="ElevenLabs Voice ID" style="flex:1" />
-        <button id="qCheckVoice" onclick="checkVoice()">Kiểm tra giọng</button>
-        <button class="ghost" onclick="previewVoice()">▶ Nghe thử giọng</button>
+      <h2>Giọng đọc</h2>
+      <div class="tts-tabs" id="ttsTabs">
+        <button class="tts-tab ${state.ttsProvider === 'elevenlabs' ? 'active' : ''}" data-p="elevenlabs">ELEVENLABS</button>
+        <button class="tts-tab ${state.ttsProvider === 'edge' ? 'active' : ''}" data-p="edge">TEST MIỄN PHÍ</button>
       </div>
-      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>
+      <div class="tts-subnote" id="ttsSubnote"></div>
+      <div id="ttsPanel"></div>
       <audio id="qPreview" style="display:none;margin-top:8px;width:100%" controls></audio>
     </div>
 
@@ -174,6 +184,20 @@ async function renderQuick() {
       <button class="secondary" id="qTestBtn" onclick="renderTest10s()">⏱ KIỂM TRA 10 GIÂY</button>
       <button class="primary big" id="qRenderBtn" onclick="renderFull()">⬇ TẠO VIDEO</button>
       <span class="muted" style="font-size:11px;align-self:center">Ctrl+Enter = tạo video</span>
+    </div>
+    <div class="card mouth-test-card">
+      <h2>Test khẩu hình miễn phí</h2>
+      <div class="hint">Kiểm tra chuyển động miệng / mask / cằm / lipsync bằng giọng test Edge TTS — <b>không tốn quota ElevenLabs</b>. Dùng đoạn test chuẩn để so sánh các avatar công bằng.</div>
+      <div class="row" style="margin-top:8px;align-items:flex-start;flex-wrap:wrap">
+        <label style="flex:1;min-width:220px">Đoạn test chuẩn (Vietnamese)
+          <textarea id="qMouthScript" rows="2" style="margin-top:4px">${esc(STANDARD_MOUTH_TEST_SCRIPT)}</textarea>
+        </label>
+      </div>
+      <div class="actions">
+        <button class="ghost" onclick="useStandardMouthScript()">Dùng đoạn test chuẩn</button>
+        <button class="primary" id="qMouthBtn" onclick="renderMouthTest()">🅣 TEST KHẨU HÌNH 10 GIÂY (MIỄN PHÍ)</button>
+      </div>
+      <div class="hint" style="margin-top:8px">Giọng test miễn phí chỉ dùng để kiểm tra chuyển động miệng. Khi render bản chính thức, hãy chuyển sang ElevenLabs để dùng giọng production.</div>
     </div>`;
   const sel = $("#qAvatar");
   if (!readyAvs.length) {
@@ -197,8 +221,13 @@ async function renderQuick() {
   else if (state.selectedAvatar && readyAvs.some(a => a.avatar_id === state.selectedAvatar.avatar_id)) { sel.value = state.selectedAvatar.avatar_id; sel.onchange(); }
   $("#qScript").value = state.scriptText;
   $("#qScript").oninput = (e) => { state.scriptText = e.target.value; updateScriptInfo(); };
-  $("#qVoice").value = state.voiceId;
-  $("#qVoice").oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; ls.set("studio_voiceId", e.target.value); };
+  // TTS provider tabs (explicit, never silent switch).
+  $$("#ttsTabs .tts-tab").forEach(t => t.onclick = () => {
+    state.ttsProvider = t.dataset.p;
+    $$("#ttsTabs .tts-tab").forEach(x => x.classList.toggle("active", x === t));
+    renderTTSPanel();
+  });
+  renderTTSPanel();
   $("#qSplit").value = state.splitMode;
   $("#qSplit").onchange = (e) => { state.splitMode = e.target.value; updateSegPreview(); };
   $("#qFile").onchange = async (e) => {
@@ -213,6 +242,80 @@ async function renderQuick() {
     } else toast(d.error || "Không đọc được kịch bản", "bad");
   };
   updateScriptInfo(); updateSegPreview();
+}
+
+function renderTTSPanel() {
+  const panel = $("#ttsPanel"); if (!panel) return;
+  const note = $("#ttsSubnote");
+  if (state.ttsProvider === "edge") {
+    if (note) note.innerHTML = `<span class="tag muted">TEST MIỄN PHÍ — EDGE TTS</span> <span class="muted">Giọng test miễn phí, không tốn quota. Chỉ dùng để kiểm tra khẩu hình.</span>`;
+    const opts = (state.edgeVoices.length ? state.edgeVoices : [
+      { voice_id: "vi-VN-HoaiMyNeural", label: "Nữ — Hoài My" },
+      { voice_id: "vi-VN-NamMinhNeural", label: "Nam — Nam Minh" },
+    ]).map(v => `<option value="${esc(v.voice_id)}" ${v.voice_id === state.edgeVoice ? 'selected' : ''}>${esc(v.label)}</option>`).join("");
+    panel.innerHTML = `
+      <label>Giọng test</label>
+      <div class="row">
+        <select id="qEdgeVoice" style="flex:1">${opts}</select>
+        <button class="ghost" onclick="previewEdgeVoice()">▶ Nghe thử giọng test</button>
+      </div>
+      <div id="qEdgeInfo" style="margin-top:8px;font-size:12px"></div>
+      <div class="hint" style="margin-top:6px">Giọng test miễn phí sử dụng dịch vụ TTS online. Nội dung văn bản test được gửi tới dịch vụ tạo giọng.</div>`;
+    const esel = $("#qEdgeVoice");
+    if (esel) esel.onchange = (e) => { state.edgeVoice = e.target.value; ls.set("studio_edge_voice", e.target.value); };
+  } else {
+    if (note) note.innerHTML = `<span class="tag good">ELEVENLABS</span> <span class="muted">Giọng production. Cần Voice ID chính xác.</span>`;
+    panel.innerHTML = `
+      <label>Copy Voice ID từ ElevenLabs và dán vào đây — ghi nhớ trên máy này</label>
+      <div class="row">
+        <input id="qVoice" placeholder="ElevenLabs Voice ID" style="flex:1" />
+        <button id="qCheckVoice" onclick="checkVoice()">Kiểm tra giọng</button>
+        <button class="ghost" onclick="previewVoice()">▶ Nghe thử giọng</button>
+      </div>
+      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>`;
+    const v = $("#qVoice"); if (v) {
+      v.value = state.voiceId;
+      v.oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; ls.set("studio_voiceId", e.target.value); };
+    }
+  }
+}
+async function loadEdgeVoices() {
+  try {
+    const r = await api("/api/voice/edge/voices");
+    if (r.ok && r.voices && r.voices.length) {
+      state.edgeVoices = r.voices;
+      if (!r.voices.some(v => v.voice_id === state.edgeVoice)) state.edgeVoice = r.default || state.edgeVoice;
+    }
+  } catch (e) { /* keep known fallback */ }
+}
+async function previewEdgeVoice() {
+  const voice = state.edgeVoice;
+  const txt = state.scriptText || STANDARD_MOUTH_TEST_SCRIPT;
+  if (!txt) return toast("Nhập kịch bản trước", "warn");
+  toast("Đang tạo thử giọng test miễn phí…");
+  const r = await api("/api/voice/edge/preview", { method: "POST", body: JSON.stringify({ voice_id: voice, script_text: txt }) });
+  const info = $("#qEdgeInfo");
+  if (r.ok) {
+    const a = $("#qPreview"); a.src = r.preview_url; a.style.display = "block"; a.play();
+    if (info) info.innerHTML = `<span class="tag good">✓ ${esc(r.voice_label || voice)}</span> <span class="muted">${(r.duration_sec||0).toFixed(1)}s</span>`;
+  } else {
+    if (info) info.innerHTML = `<span class="tag bad">✗ Giọng test miễn phí hiện không khả dụng</span> <span class="muted">${esc(r.error||"")}</span>`;
+    toast(r.error || "Giọng test miễn phí hiện không khả dụng", "bad");
+  }
+}
+function useStandardMouthScript() {
+  const ta = $("#qMouthScript"); if (ta) ta.value = STANDARD_MOUTH_TEST_SCRIPT;
+  toast("Đã dùng đoạn test chuẩn", "good");
+}
+async function renderMouthTest() {
+  const av = $("#qAvatar").value;
+  if (!av) return toast("Chọn AI Avatar", "warn");
+  const script = ($("#qMouthScript") && $("#qMouthScript").value.trim()) || STANDARD_MOUTH_TEST_SCRIPT;
+  $("#qMouthBtn").disabled = true;
+  const r = await api("/api/render/mouth-test", { method: "POST", body: JSON.stringify({ avatar_id: av, edge_voice: state.edgeVoice, script_text: script }) });
+  $("#qMouthBtn").disabled = false;
+  if (r.ok) { toast("Đã đưa test khẩu hình (miễn phí) vào hàng đợi", "good"); switchView("history"); }
+  else toast(r.error || "Không xếp hàng được", "bad");
 }
 function renderAvatarPick(a) {
   const box = $("#qAvatarPick"); if (!box) return;
@@ -283,39 +386,57 @@ async function previewVoice() {
     const a = $("#qPreview"); a.src = r.preview_url; a.style.display = "block"; a.play();
   } else toast(r.error || "Không nghe thử được (không dùng giọng thay thế)", "bad");
 }
+function activeVoiceId() {
+  // The voice id for the currently selected provider. Edge mode uses the
+  // selected free Edge voice; ElevenLabs mode uses the user-entered Voice ID.
+  if (state.ttsProvider === "edge") return state.edgeVoice;
+  return ($("#qVoice") && $("#qVoice").value.trim()) || state.voiceId;
+}
 async function renderTest10s() {
-  const av = $("#qAvatar").value, vid = $("#qVoice").value.trim(), txt = state.scriptText;
+  const av = $("#qAvatar").value, vid = activeVoiceId(), txt = state.scriptText;
   if (!av) return toast("Chọn AI Avatar", "warn");
-  if (!vid) return toast("Nhập Voice ID", "warn");
+  if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
-  ls.set("studio_voiceId", vid);
+  if (state.ttsProvider === "elevenlabs") ls.set("studio_voiceId", vid);
   $("#qTestBtn").disabled = true;
-  const r = await api("/api/render/test", { method: "POST", body: JSON.stringify({ avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta }) });
+  const body = state.ttsProvider === "edge"
+    ? { avatar_id: av, voice_id: vid, script_text: txt, tts_provider: "EDGE_TTS_TEST", test_mode: true, test_type: "SCRIPT_PREVIEW", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
+    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta };
+  const r = await api("/api/render/test", { method: "POST", body: JSON.stringify(body) });
   $("#qTestBtn").disabled = false;
   if (r.ok) { toast("Đã đưa kiểm tra 10 giây vào hàng đợi", "good"); switchView("history"); }
   else toast(r.error || "Không xếp hàng được", "bad");
 }
 async function renderFull() {
-  const av = $("#qAvatar").value, vid = $("#qVoice").value.trim(), txt = state.scriptText;
+  const av = $("#qAvatar").value, vid = activeVoiceId(), txt = state.scriptText;
   if (!av) return toast("Chọn AI Avatar", "warn");
-  if (!vid) return toast("Nhập Voice ID", "warn");
+  if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
-  ls.set("studio_voiceId", vid);
+  if (state.ttsProvider === "elevenlabs") ls.set("studio_voiceId", vid);
   $("#qRenderBtn").disabled = true;
-  const r = await api("/api/render", { method: "POST", body: JSON.stringify({ avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta }) });
+  const body = state.ttsProvider === "edge"
+    ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
+    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta };
+  const r = await api("/api/render", { method: "POST", body: JSON.stringify(body) });
   $("#qRenderBtn").disabled = false;
   if (r.ok) { toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good"); switchView("history"); }
   else toast(r.error || "Không xếp hàng được", "bad");
 }
+function edgeVoiceLabel(vid) {
+  const v = (state.edgeVoices || []).find(x => x.voice_id === vid);
+  return v ? v.label : (vid === "vi-VN-HoaiMyNeural" ? "Nữ — Hoài My" : vid === "vi-VN-NamMinhNeural" ? "Nam — Nam Minh" : "Edge TTS");
+}
 
 // --------------------------------------------------------------------------- //
 // CREATE AVATAR
-let createState = { videoPath: null, quality: null, override: false, prepAvatarId: null };
+let createState = { videoPath: null, quality: null, override: false, prepAvatarId: null,
+  mouthStateUser: null, mouthStateAuto: null, mouthStateProvenance: "UNKNOWN" };
 async function renderCreate() {
   const el = $("#content");
   el.innerHTML = `
     <h1 class="view-title">Tạo AI Avatar mới</h1>
-    <p class="view-sub">Video gốc → tự động kiểm tra → đánh giá → chuẩn bị → sẵn sàng</p>
+    <p class="view-sub">Xem mẫu → Hiểu yêu cầu → Tải lên → Tự động kiểm tra → Xác nhận → Chuẩn bị</p>
+    <div id="cSample"></div>
     <div class="guide-panel">
       <div class="guide-title">VIDEO NHƯ THẾ NÀO SẼ CHO KẾT QUẢ TỐT?</div>
       <div class="guide-grid">
@@ -386,6 +507,19 @@ async function renderCreate() {
       </div>
     </div>
     <div class="card">
+      <h2>Trước khi tải lên</h2>
+      <div class="hint">Đây là danh sách gợi ý — bạn không cần tích từng mục.</div>
+      <div class="precheck">
+        <div class="pci">▢ Video dài khoảng 30–60 giây</div>
+        <div class="pci">▢ Khuôn mặt đủ lớn</div>
+        <div class="pci">▢ Nhìn gần chính diện</div>
+        <div class="pci">▢ Nhân vật không nói</div>
+        <div class="pci">▢ Nhìn rõ môi và cằm</div>
+        <div class="pci">▢ Camera cố định</div>
+        <div class="pci">▢ Ánh sáng ổn định</div>
+      </div>
+    </div>
+    <div class="card">
       <h2>Tải video lên</h2>
       <div class="dropzone" id="cDrop">
         <div class="big">⬆</div>
@@ -395,7 +529,9 @@ async function renderCreate() {
       <div id="cFileLabel" class="muted" style="margin-top:8px;font-size:12px"></div>
     </div>
     <div id="cQuality"></div>
+    <div id="cMouth"></div>
     <div id="cPrepare"></div>`;
+  renderSampleSlot();
   const dz = $("#cDrop");
   dz.onclick = () => $("#cFile").click();
   dz.ondragover = (e) => { e.preventDefault(); dz.classList.add("drag"); };
@@ -408,6 +544,41 @@ function toggleGuideDetail() {
   const d = $("#guideDetail");
   if (!d) return;
   d.style.display = d.style.display === "none" ? "block" : "none";
+}
+async function renderSampleSlot() {
+  const box = $("#cSample"); if (!box) return;
+  box.innerHTML = `<div class="card sample-card"><h2>Video mẫu đúng chuẩn</h2><div class="muted">Đang kiểm tra…</div></div>`;
+  const r = await api("/api/avatar/sample");
+  if (r.available) {
+    const checks = (r.checks && r.checks.length ? r.checks : [
+      "Mặt đủ lớn", "Gần chính diện", "Không nói", "Cằm đầy đủ", "Camera cố định", "Chuyển động nhẹ"
+    ]).map(c => `<div class="sample-check">✓ ${esc(c)}</div>`).join("");
+    box.innerHTML = `<div class="card sample-card">
+      <h2>Video mẫu đúng chuẩn</h2>
+      <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
+      <div class="sample-checks">${checks}</div>
+    </div>`;
+  } else {
+    // Honest pending state — no fabricated real-person sample (spec A7/H).
+    box.innerHTML = `<div class="card sample-card sample-pending">
+      <h2>Video mẫu đúng chuẩn</h2>
+      <div class="sample-pending-box">
+        <div class="big">🎬</div>
+        <div>Video mẫu chuẩn đang được cập nhật.</div>
+        <div class="muted2" style="margin-top:4px">Xem hướng dẫn khung hình schematic bên dưới.</div>
+      </div>
+      <div class="framing-diagram">
+        <div style="text-align:center">
+          <div class="framing-box good"><div class="head"></div><div class="shoulders"></div></div>
+          <div class="framing-label">NÊN: đầu + vai</div>
+        </div>
+        <div style="text-align:center">
+          <div class="framing-box bad"><div class="stick-head"></div><div class="stick"></div></div>
+          <div class="framing-label">TRÁNH: xa, mặt nhỏ</div>
+        </div>
+      </div>
+    </div>`;
+  }
 }
 async function handleCreateFile(f) {
   const fd = new FormData(); fd.append("video", f);
@@ -447,20 +618,71 @@ function renderQuality(d) {
   const strengths = (d.categories || []).filter(c => c.status === "PASS").map(c => `✓ ${esc(catLabel[c.category] || c.category)}`).join("  ");
   const warns = (d.categories || []).filter(c => c.status !== "PASS").map(c => `⚠ ${esc(catLabel[c.category] || c.category)}`).join("  ");
   $("#cQuality").innerHTML = `<div class="card">
-    <h2>KIỂM TRA VIDEO</h2>
+    <h2>KIỂM TRA VIDEO CỦA BẠN</h2>
     ${rows}
     <div class="overall-result ${overallCls}">${overallTxt}</div>
     ${strengths ? `<div class="compare-explain"><b>Điểm tốt:</b> ${strengths}</div>` : ""}
     ${warns ? `<div class="compare-explain"><b>Điểm cần lưu ý:</b> ${warns}</div>` : ""}
     ${d.overall !== "PASS" ? `<div class="qhint">Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này.</div>` : ""}
-    <div class="actions">
-      <button class="ghost" onclick="resetCreate()">Chọn video khác</button>
-      <button class="primary" onclick="showPrepare()">${d.overall === "PASS" ? "Tiếp tục" : "Vẫn sử dụng video này"}</button>
-    </div>
   </div>`;
   if (d.overall !== "PASS") createState.override = true;
+  // Mouth-state manual confirmation (spec A10/A11). V1.1.4 proved the automatic
+  // talking_proxy cannot reliably separate talking vs neutral in the normal
+  // range, so the user confirms explicitly. Raw automated evidence is stored
+  // separately and never overwritten.
+  const mouthCat = (d.categories || []).find(c => c.category === "SOURCE_MOUTH_STATE");
+  const autoStatus = mouthCat ? mouthCat.status : "UNKNOWN";
+  const autoValue = mouthCat ? (mouthCat.value != null ? mouthCat.value : mouthCat.note) : null;
+  createState.mouthStateAuto = (autoValue != null ? String(autoValue) : null);
+  renderMouthConfirm(autoStatus);
 }
-function resetCreate() { createState = { videoPath: null, quality: null, override: false, prepAvatarId: null }; renderCreate(); }
+function renderMouthConfirm(autoStatus) {
+  const box = $("#cMouth"); if (!box) return;
+  // If auto already PASSed (neutral mouth), no need to ask.
+  if (autoStatus === "PASS") {
+    createState.mouthStateUser = "NOT_TALKING";
+    createState.mouthStateProvenance = "AUTO";
+    box.innerHTML = `<div class="card"><div class="compare-row"><span class="cr-ic pass">✓</span>
+      <span class="cr-val">Miệng trung tính trong video nguồn — phù hợp.</span></div>
+      <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
+      <button class="primary" onclick="showPrepare()">Tiếp tục</button></div></div>`;
+    return;
+  }
+  // UNKNOWN or WARN/FAIL (talking detected) -> ask the user. If auto already
+  // flagged talking, pre-select "Có nói" but still allow correction.
+  const preTalk = (autoStatus === "WARN" || autoStatus === "FAIL");
+  if (preTalk) createState.mouthStateUser = "TALKING";
+  createState.mouthStateProvenance = preTalk ? "AUTO" : "UNKNOWN";
+  const r = (val, label) => `<label class="mouth-opt"><input type="radio" name="mouth" value="${val}" ${createState.mouthStateUser === val ? 'checked' : ''} onchange="onMouthPick('${val}')"/> ${label}</label>`;
+  box.innerHTML = `<div class="card mouth-confirm-card">
+    <h2>TRẠNG THÁI MIỆNG TRONG VIDEO NGUỒN</h2>
+    <div class="hint">Hệ thống chưa thể xác định chắc chắn nhân vật có đang nói hay không.</div>
+    <div class="qhint" style="margin:6px 0">Video này:</div>
+    <div class="mouth-opts">
+      ${r("NOT_TALKING", "Không nói")}
+      ${r("TALKING", "Có nói")}
+      ${r("UNSURE", "Tôi không chắc")}
+    </div>
+    <div id="cMouthResult"></div>
+  </div>`;
+  if (preTalk) onMouthPick("TALKING");
+}
+function onMouthPick(val) {
+  createState.mouthStateUser = val;
+  createState.mouthStateProvenance = "USER_CONFIRMED";
+  const res = $("#cMouthResult"); if (!res) return;
+  if (val === "TALKING") {
+    // A11: talking warning, overridable.
+    res.innerHTML = `<div class="bad-box" style="margin-top:10px">⚠ NHÂN VẬT ĐANG NÓI TRONG VIDEO NGUỒN<br>
+      <span class="muted2" style="font-size:12px">Video vẫn có thể sử dụng, nhưng nguồn không nói thường phù hợp hơn để tạo AI Avatar ổn định.</span></div>
+      <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
+      <button class="primary" onclick="showPrepare()">Vẫn sử dụng video này</button></div>`;
+  } else {
+    res.innerHTML = `<div class="actions" style="margin-top:10px"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
+      <button class="primary" onclick="showPrepare()">Tiếp tục</button></div>`;
+  }
+}
+function resetCreate() { createState = { videoPath: null, quality: null, override: false, prepAvatarId: null, mouthStateUser: null, mouthStateAuto: null, mouthStateProvenance: "UNKNOWN" }; renderCreate(); }
 function showPrepare() {
   const d = createState.quality || {};
   $("#cPrepare").innerHTML = `<div class="card">
@@ -478,7 +700,14 @@ async function prepareAvatar() {
   const name = $("#cName").value.trim();
   if (!name) return toast("Nhập tên AI Avatar", "warn");
   const q = createState.quality || {};
-  const r = await api("/api/avatar/prepare", { method: "POST", body: JSON.stringify({ video_path: createState.videoPath, avatar_name: name, allow_warning_override: createState.override, quality_result: q.raw, quality_warnings: q.warnings, overall: q.overall }) });
+  const r = await api("/api/avatar/prepare", { method: "POST", body: JSON.stringify({
+    video_path: createState.videoPath, avatar_name: name,
+    allow_warning_override: createState.override,
+    quality_result: q.raw, quality_warnings: q.warnings, overall: q.overall,
+    mouth_state_user: createState.mouthStateUser,
+    mouth_state_auto: createState.mouthStateAuto,
+    mouth_state_provenance: createState.mouthStateProvenance,
+  }) });
   if (!r.ok) return toast(r.error || "Không chuẩn bị được", "bad");
   createState.prepAvatarId = r.avatar_id;
   $("#cPrepBtn").disabled = true;
@@ -778,13 +1007,37 @@ function jobCardHTML(j) {
   if (j.status === "complete") actions = `<button class="ghost" onclick="openFolder('${j.job_id}')">Mở thư mục</button>`;
   else if (["failed","cancelled","timed_out"].includes(j.status)) actions = `<button class="ghost" onclick="retryJob('${j.job_id}')">Thử lại</button>`;
   else if (j.status !== "complete") actions = `<button class="danger" onclick="cancelJob('${j.job_id}')">Hủy</button>`;
-  const voiceName = j.voice_meta ? (() => { try { return JSON.parse(j.voice_meta).name || ""; } catch (e) { return ""; } })() : "";
-  const kindLabel = j.kind === "test10s" ? "Kiểm tra 10s" : (j.script_name || "Đầy đủ");
-  return `<div class="job" data-job="${j.job_id}">
+  // Provider + test/production badge (spec Part D / E). Edge voice shows its
+  // human label; ElevenLabs shows the Voice ID + optional name.
+  const provider = j.tts_provider || "ELEVENLABS";
+  const isTest = (j.test_mode === 1 || j.test_mode === true || j.kind === "mouhtest" || j.kind === "test10s");
+  const isMouthTest = (j.test_type === "STANDARD_MOUTH_TEST" || j.kind === "mouhtest");
+  let voiceName = "";
+  let voiceDisplay = esc(j.voice_id || "");
+  try {
+    const meta = j.voice_meta ? JSON.parse(j.voice_meta) : null;
+    if (meta) {
+      if (meta.provider === "edge_tts" && meta.voice_label) { voiceName = meta.voice_label; voiceDisplay = esc(meta.voice_label); }
+      else if (meta.name) voiceName = meta.name;
+    }
+  } catch (e) { /* ignore */ }
+  if (provider === "EDGE_TTS_TEST" && !voiceName) {
+    voiceName = (j.edge_voice === "vi-VN-HoaiMyNeural") ? "Nữ — Hoài My"
+      : (j.edge_voice === "vi-VN-NamMinhNeural") ? "Nam — Nam Minh" : "Edge TTS";
+    voiceDisplay = esc(voiceName);
+  }
+  const providerTag = provider === "EDGE_TTS_TEST"
+    ? `<span class="tag muted">Edge TTS</span>` : `<span class="tag good">ElevenLabs</span>`;
+  const testBadge = isMouthTest
+    ? `<span class="tag warn">BẢN TEST KHẨU HÌNH</span>`
+    : (isTest ? `<span class="tag warn">BẢN TEST</span>` : `<span class="tag good">BẢN PRODUCTION</span>`);
+  const kindLabel = isMouthTest ? "Test khẩu hình" : (j.kind === "test10s" ? "Kiểm tra 10s" : (j.script_name || "Đầy đủ"));
+  return `<div class="job ${isTest ? 'is-test' : 'is-prod'}" data-job="${j.job_id}">
     ${thumb}
     <div class="jbody">
       <div class="jtitle">${esc(kindLabel)} · ${esc(j.avatar_id)}${j.gpu_id !== null ? ` · GPU${j.gpu_id}` : ""}</div>
-      <div class="jsub">Giọng: ${esc(j.voice_id)}${voiceName ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
+      <div class="jsub">Giọng: ${voiceDisplay}${voiceName && provider === "ELEVENLABS" ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
+      <div class="jbadges">${testBadge} ${providerTag}</div>
       <div class="fstatus ${j.status}">${statusLabel(j.status)}${j.error ? " · " + stageTxt : ""}</div>
       ${["rendering","encoding","verifying","preparing_audio"].includes(j.status) && j.progress != null ? `<div class="progress" style="margin-top:6px"><div style="width:${j.progress}%"></div></div>` : ""}
     </div>
@@ -824,6 +1077,11 @@ async function renderSettings() {
         <div class="row"><input id="sKey" type="password" placeholder="API key ElevenLabs mới" style="flex:1" />
         <button class="primary" onclick="saveKey()">Cập nhật Key</button></div>
       </div>
+    </div>
+    <div class="card">
+      <h2>Giọng test miễn phí (Edge TTS)</h2>
+      <div class="kv"><span class="k">Trạng thái</span><span class="v">${s.edge_tts_available ? '<span style="color:var(--good)">● Khả dụng</span>' : '<span style="color:var(--bad)">● Không khả dụng</span>'}</span></div>
+      <div class="hint" style="margin-top:6px">Giọng test miễn phí sử dụng dịch vụ TTS online. Nội dung văn bản test được gửi tới dịch vụ tạo giọng. Không gửi API key, video avatar hay ảnh đã chuẩn bị. Chỉ dùng để kiểm tra chuyển động miệng — không phải giọng production.</div>
     </div>
     <div class="card">
       <h2>Trạng thái hệ thống (chỉ xem)</h2>
@@ -881,12 +1139,14 @@ async function refreshQueue() {
 (async function init() {
   $$(".nav-item").forEach(b => b.addEventListener("click", () => switchView(b.dataset.view)));
   state.voiceId = ls.get("studio_voiceId", "");
+  state.edgeVoice = ls.get("studio_edge_voice", "vi-VN-HoaiMyNeural");
   document.addEventListener("keydown", (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && state.view === "quick") { e.preventDefault(); renderFull(); }
     if (e.key === "Escape") closeModal();
   });
   await loadStatus();
   await loadAvatars();
+  await loadEdgeVoices();
   switchView("quick");
   setInterval(refreshQueue, 2500);
   setInterval(loadAvatars, 15000);

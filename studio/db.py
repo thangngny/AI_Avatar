@@ -64,7 +64,14 @@ def init_db() -> None:
                     quality_result    TEXT,                      -- JSON of validator output (for avatar-prep jobs)
                     quality_warnings  TEXT,                      -- JSON list of human-readable warnings
                     user_override     INTEGER DEFAULT 0,         -- 1 = used a WARN/POOR source anyway
-                    truth_hash        TEXT                        -- sha1 of render_truth.json at job time
+                    truth_hash        TEXT,                       -- sha1 of render_truth.json at job time
+                    tts_provider      TEXT DEFAULT 'ELEVENLABS',  -- 'ELEVENLABS' | 'EDGE_TTS_TEST' (explicit, never fallback)
+                    test_mode         INTEGER DEFAULT 0,          -- 1 = a TEST render (mouth-motion test), 0 = production
+                    test_type         TEXT,                       -- 'STANDARD_MOUTH_TEST' | 'SCRIPT_PREVIEW' | 'PRODUCTION'
+                    edge_voice        TEXT,                       -- Edge TTS voice id when tts_provider='EDGE_TTS_TEST'
+                    mouth_state_auto  TEXT,                       -- automated mouth-state evidence (raw, never overwritten)
+                    mouth_state_user  TEXT,                       -- user-confirmed mouth state: 'NOT_TALKING'|'TALKING'|'UNSURE'
+                    mouth_state_provenance TEXT                   -- 'AUTO'|'USER_CONFIRMED'|'UNKNOWN'
                 );
 
                 CREATE TABLE IF NOT EXISTS avatars (
@@ -89,6 +96,22 @@ def init_db() -> None:
                 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
                 """
             )
+            # --- Migrations: add columns introduced after the initial schema.
+            # ALTER TABLE ... ADD COLUMN is idempotent-guarded by checking the
+            # existing columns first, so an existing studio.db upgrades in place
+            # without losing data.
+            existing = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+            for col, decl in (
+                ("tts_provider", "TEXT DEFAULT 'ELEVENLABS'"),
+                ("test_mode", "INTEGER DEFAULT 0"),
+                ("test_type", "TEXT"),
+                ("edge_voice", "TEXT"),
+                ("mouth_state_auto", "TEXT"),
+                ("mouth_state_user", "TEXT"),
+                ("mouth_state_provenance", "TEXT"),
+            ):
+                if col not in existing:
+                    conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
             conn.commit()
         finally:
             conn.close()
@@ -111,8 +134,10 @@ def create_job(job: Dict[str, Any]) -> None:
                        voice_id, voice_meta, script_text, script_name, script_segment,
                        master_audio_path, output_path, duration_sec, status, progress,
                        stage, gpu_id, pid, log_path, error, quality_result,
-                       quality_warnings, user_override, truth_hash)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       quality_warnings, user_override, truth_hash,
+                       tts_provider, test_mode, test_type, edge_voice,
+                       mouth_state_auto, mouth_state_user, mouth_state_provenance)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     job["job_id"], _now(), _now(), job["kind"], job["avatar_id"],
                     job["voice_id"], job.get("voice_meta"), job.get("script_text"),
@@ -123,6 +148,10 @@ def create_job(job: Dict[str, Any]) -> None:
                     job.get("pid"), job.get("log_path"), job.get("error"),
                     job.get("quality_result"), job.get("quality_warnings"),
                     job.get("user_override", 0), job.get("truth_hash"),
+                    job.get("tts_provider", "ELEVENLABS"), job.get("test_mode", 0),
+                    job.get("test_type"), job.get("edge_voice"),
+                    job.get("mouth_state_auto"), job.get("mouth_state_user"),
+                    job.get("mouth_state_provenance"),
                 ),
             )
             conn.commit()

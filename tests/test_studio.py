@@ -493,5 +493,272 @@ class TestRepairs(StudioTestCase):
                       db.get_job("j_to")["output_path"])
 
 
+# --------------------------------------------------------------------------- #
+# V1.1.5 — Free Edge TTS test path + guided avatar input
+# --------------------------------------------------------------------------- #
+class TestEdgeTTS(StudioTestCase):
+    """Edge TTS free-test provider (spec Part B). No API key, no ElevenLabs
+    fallback, canonical 16kHz mono WAV output."""
+
+    def test_edge_client_present_no_api_key(self):
+        from studio import edge_tts_client as edge
+        # Edge TTS requires NO ElevenLabs API key. is_available reflects the
+        # package, not a key.
+        self.assertTrue(callable(edge.is_available))
+        self.assertEqual(edge.DEFAULT_VOICE, "vi-VN-HoaiMyNeural")
+        # Known Vietnamese voices are configured.
+        self.assertIn("vi-VN-HoaiMyNeural", edge.KNOWN_VOICES)
+        self.assertIn("vi-VN-NamMinhNeural", edge.KNOWN_VOICES)
+
+    def test_edge_voices_list_has_vietnamese(self):
+        from studio import edge_tts_client as edge
+        if not edge.is_available():
+            self.skipTest("edge-tts not installed")
+        lv = edge.list_voices()
+        self.assertTrue(lv["ok"])
+        ids = [v["voice_id"] for v in lv["voices"]]
+        # The default voice must be in the list (live or known fallback).
+        self.assertIn(edge.DEFAULT_VOICE, ids)
+        for v in lv["voices"]:
+            self.assertTrue(v["voice_id"].lower().startswith("vi-vn"))
+
+    def test_edge_failure_does_not_call_elevenlabs(self):
+        """Spec B8: if Edge TTS fails, never silently fall back to ElevenLabs."""
+        from studio import render_service, edge_tts_client as edge, elevenlabs_client as el
+        # Force Edge to be "installed" but fail at synth; fail if ElevenLabs is touched.
+        orig_avail = edge.is_available
+        orig_synth = edge.synth_to_wav
+        el_called = {"v": False}
+        edge.is_available = lambda: True
+        def _edge_fail(*a, **k):
+            raise edge.EdgeTTSUnavailable("simulated edge failure")
+        edge.synth_to_wav = _edge_fail
+        def _el_trap(*a, **k):
+            el_called["v"] = True
+            return ("x", 0.0)
+        orig_el_synth = el.synth_to_wav
+        el.synth_to_wav = _el_trap
+        try:
+            r = render_service.generate_master_audio(
+                "Ba mẹ mỉm cười.", "vi-VN-HoaiMyNeural",
+                tts_provider=render_service.EDGE_TTS_TEST)
+        finally:
+            edge.is_available = orig_avail
+            edge.synth_to_wav = orig_synth
+            el.synth_to_wav = orig_el_synth
+        self.assertFalse(r["ok"])
+        self.assertFalse(el_called["v"], "Edge failure must NOT fall back to ElevenLabs")
+
+    def test_elevenlabs_failure_does_not_call_edge(self):
+        """Spec B8 (reverse): if ElevenLabs fails, never silently use Edge."""
+        from studio import render_service, elevenlabs_client as el, edge_tts_client as edge
+        el_called = {"v": False}
+        edge_called = {"v": False}
+        orig_el_conf = el.is_configured
+        orig_el_synth = el.synth_to_wav
+        el.is_configured = lambda: True
+        def _el_fail(*a, **k):
+            el_called["v"] = True
+            raise el.TTSUnavailable("simulated elevenlabs failure")
+        el.synth_to_wav = _el_fail
+        orig_edge_synth = edge.synth_to_wav
+        def _edge_trap(*a, **k):
+            edge_called["v"] = True
+            return ("x", 0.0)
+        edge.synth_to_wav = _edge_trap
+        try:
+            r = render_service.generate_master_audio(
+                "Xin chào.", "pGapy9MNHCukzJtjavF0",
+                tts_provider=render_service.ELEVENLABS)
+        finally:
+            el.is_configured = orig_el_conf
+            el.synth_to_wav = orig_el_synth
+            edge.synth_to_wav = orig_edge_synth
+        self.assertFalse(r["ok"])
+        self.assertTrue(el_called["v"])
+        self.assertFalse(edge_called["v"], "ElevenLabs failure must NOT fall back to Edge")
+
+    def test_edge_audio_canonical_wav(self):
+        """Spec B7: Edge audio decodes to canonical 16kHz mono WAV. Network test."""
+        if not os.environ.get("STUDIO_RUN_NETWORK_TESTS"):
+            self.skipTest("set STUDIO_RUN_NETWORK_TESTS=1 for real Edge TTS")
+        from studio import edge_tts_client as edge
+        if not edge.is_available():
+            self.skipTest("edge-tts not installed")
+        out = os.path.join(self.tmp, "edge.wav")
+        path, dur = edge.synth_to_wav("vi-VN-HoaiMyNeural",
+                                      "Ba mẹ mỉm cười và Minh mua một hộp bánh mì.", out)
+        import soundfile as sf
+        info = sf.info(path)
+        self.assertEqual(info.samplerate, 16000)
+        self.assertEqual(info.channels, 1)
+        self.assertGreater(dur, 0.5)
+
+
+class TestMouthTestJob(StudioTestCase):
+    """Standard mouth-motion test job (spec B9/B10/B11/D)."""
+
+    def test_mouth_test_refuses_non_ready_avatar(self):
+        from studio import render_service
+        r = render_service.create_mouth_test_job("__nonexistent__", "vi-VN-HoaiMyNeural")
+        self.assertFalse(r["ok"])
+
+    def test_mouth_test_job_metadata(self):
+        from studio import render_service, avatar_service, db
+        ready = [a for a in avatar_service.list_avatars() if a["ready"]]
+        if not ready:
+            self.skipTest("no prepared avatar on disk")
+        av = ready[0]["avatar_id"]
+        r = render_service.create_mouth_test_job(av, "vi-VN-HoaiMyNeural")
+        self.assertTrue(r["ok"])
+        job = db.get_job(r["job_id"])
+        self.assertEqual(job["tts_provider"], render_service.EDGE_TTS_TEST)
+        self.assertEqual(job["test_mode"], 1)
+        self.assertEqual(job["test_type"], render_service.TEST_TYPE_STANDARD_MOUTH)
+        self.assertEqual(job["edge_voice"], "vi-VN-HoaiMyNeural")
+        # The standard diagnostic script is stored.
+        self.assertIn("bánh mì", job["script_text"])
+        # No API key leaked.
+        for k, v in job.items():
+            if v and isinstance(v, str):
+                self.assertNotIn("ELEVENLABS_API_KEY", v)
+                self.assertNotIn("sk_", v)
+
+    def test_standard_mouth_script_has_bilabials(self):
+        from studio import render_service
+        s = render_service.STANDARD_MOUTH_TEST_SCRIPT
+        # bilabials m/b/p present (spec B10).
+        for ch in "mbp":
+            self.assertIn(ch, s.lower())
+
+    def test_test_job_records_provider(self):
+        """Spec D: jobs record tts_provider/test_mode/test_type explicitly."""
+        from studio import render_service, avatar_service, db
+        ready = [a for a in avatar_service.list_avatars() if a["ready"]]
+        if not ready:
+            self.skipTest("no prepared avatar on disk")
+        av = ready[0]["avatar_id"]
+        r = render_service.create_test_job(av, "vi-VN-HoaiMyNeural", "Xin chào.",
+                                           tts_provider=render_service.EDGE_TTS_TEST,
+                                           test_mode=True)
+        self.assertTrue(r["ok"])
+        job = db.get_job(r["job_id"])
+        self.assertEqual(job["tts_provider"], render_service.EDGE_TTS_TEST)
+        self.assertEqual(job["test_mode"], 1)
+        # Full render records PRODUCTION.
+        r2 = render_service.create_full_jobs(av, "pGapy9MNHCukzJtjavF0", "Xin chào. Test.", "full")
+        if r2["ok"]:
+            job2 = db.get_job(r2["job_ids"][0])
+            self.assertEqual(job2["tts_provider"], render_service.ELEVENLABS)
+            self.assertEqual(job2["test_mode"], 0)
+            self.assertEqual(job2["test_type"], render_service.TEST_TYPE_PRODUCTION)
+
+
+class TestMouthStatePersistence(StudioTestCase):
+    """Spec A10/D: user-confirmed mouth state is stored separately, raw auto
+    evidence never overwritten."""
+
+    def test_mouth_state_stored_in_quality_data(self):
+        from studio import db
+        import json as _json
+        db.upsert_avatar("__mouth_test__", ready=0, quality="PASS",
+                         quality_data=_json.dumps({
+                             "mouth_state_auto": "0.012",
+                             "mouth_state_user": "NOT_TALKING",
+                             "mouth_state_provenance": "USER_CONFIRMED"}),
+                         created_at=0.0)
+        row = db.get_avatar("__mouth_test__")
+        qd = _json.loads(row["quality_data"])
+        self.assertEqual(qd["mouth_state_user"], "NOT_TALKING")
+        self.assertEqual(qd["mouth_state_provenance"], "USER_CONFIRMED")
+        # Raw auto evidence preserved separately.
+        self.assertEqual(qd["mouth_state_auto"], "0.012")
+
+
+class TestSampleEndpoint(StudioTestCase):
+    """Spec A7/H: sample-video slot — honest pending state when no approved
+    compliant sample exists."""
+
+    def setUp(self):
+        super().setUp()
+        from studio.app import app
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+
+    def test_sample_endpoint_reports_pending_or_real(self):
+        r = self.client.get("/api/avatar/sample")
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertIn(d["status"], ("SAMPLE_ASSET_PENDING_HUMAN_APPROVAL",
+                                     "REAL_COMPLIANT_SOURCE"))
+        # Must never fabricate availability without an approved manifest.
+        if not d.get("available"):
+            self.assertEqual(d["status"], "SAMPLE_ASSET_PENDING_HUMAN_APPROVAL")
+            self.assertIn("cập nhật", d["message"].lower())
+
+
+class TestEdgeAPIRoutes(StudioTestCase):
+    """Spec B1/B5: edge voice routes, no ElevenLabs Voice ID required."""
+
+    def setUp(self):
+        super().setUp()
+        from studio.app import app
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+
+    def test_edge_voices_route(self):
+        r = self.client.get("/api/voice/edge/voices")
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        from studio import edge_tts_client as edge
+        if edge.is_available():
+            self.assertTrue(d["ok"])
+            self.assertTrue(d["voices"])
+
+    def test_edge_preview_requires_text(self):
+        r = self.client.post("/api/voice/edge/preview",
+                             json={"voice_id": "vi-VN-HoaiMyNeural", "text": ""})
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(r.get_json()["ok"])
+
+    def test_mouth_test_route_requires_avatar(self):
+        r = self.client.post("/api/render/mouth-test",
+                             json={"edge_voice": "vi-VN-HoaiMyNeural"})
+        self.assertEqual(r.status_code, 400)
+        self.assertFalse(r.get_json()["ok"])
+
+    def test_system_status_has_edge_field(self):
+        r = self.client.get("/api/system/status")
+        d = r.get_json()
+        self.assertIn("edge_tts_available", d)
+
+
+class TestLockedTruthUnchangedV115(StudioTestCase):
+    """Spec Part C/K: changing TTS provider does NOT change the lipsync truth."""
+
+    def test_edge_job_uses_same_renderer_and_truth(self):
+        from studio import render_service, config
+        # The renderer invoked is the SAME production entrypoint regardless of
+        # provider. Confirm the constants + truth are intact.
+        self.assertTrue(config.RENDERER.endswith("generate_video_from_script.py"))
+        r = render_service.load_truth()
+        self.assertTrue(r["ok"])
+        t = r["truth"]
+        self.assertEqual(t["pipeline"], "musetalk_v15")
+        self.assertEqual(t["audio_gain"], 1.5)
+        self.assertEqual(t["audio_context_left"], 0)
+        self.assertEqual(t["audio_feature_offset_frames"], -3)
+        self.assertEqual(t["fps"], 25)
+        self.assertEqual(t["resolution_width"], 1080)
+        self.assertEqual(t["resolution_height"], 1920)
+        self.assertTrue(t["cuda_graph"])
+        self.assertTrue(t["long_audio_wola"])
+        self.assertTrue(t["feature_coverage_assertion"])
+        # render_truth.json on disk is unmodified.
+        with open(os.path.join(ROOT, "config", "render_truth.json"), "r",
+                  encoding="utf-8") as f:
+            self.assertEqual(json.load(f), t)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
