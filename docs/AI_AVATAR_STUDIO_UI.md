@@ -206,3 +206,63 @@ experimentally-validated values. If a render looks wrong, the cause is almost
 always the source avatar or the script, not the locked lip-sync config.
 
 LatentSync remains **experimental only** and is unreachable from this UI.
+
+---
+
+# V1.1 — Giao diện tiếng Việt & Thư viện chất lượng
+
+Từ V1.1, toàn bộ giao diện operator là **tiếng Việt** (điều hướng, nút, nhãn,
+cảnh báo, thông báo, trạng thái job, trạng thái hệ thống, cài đặt). Enum kỹ thuật
+giữ tiếng Anh ở backend; UI dịch sang tiếng Việt.
+
+## Thư viện AI Avatar — hệ thống đánh giá chất lượng
+
+Thư viện phân biệt hai khái niệm tách biệt:
+
+- **Trạng thái kỹ thuật (technical status)**: `SẴN SÀNG` / `CHƯA HOÀN TẤT`.
+  SẴN SÀNG = đủ artifact để render.
+- **Chất lượng nguồn (quality status)**: `RẤT TỐT` / `TỐT` / `CẢNH BÁO` /
+  `KHÔNG KHUYẾN NGHỊ` / `CHƯA CÓ DỮ LIỆU`.
+  Chất lượng = nguồn gốc tốt cỡ nào cho lipsync — KHÔNG đồng nghĩa với sẵn sàng.
+
+Một avatar có thể `SẴN SÀNG` nhưng `CẢNH BÁO` (dùng được nhưng chất lượng
+khẩu hình thấp hơn tối ưu). Một avatar `CHƯA HOÀN TẤT` không hiển thị chất
+lượng (chưa đủ dữ liệu để đánh giá).
+
+### Đánh giá đến từ đâu (không bịa đặt)
+
+- Chất lượng được tính từ **validator thật** (`tools/avatar_source_quality/validator.py`)
+  chạy read-only trên **video nguồn** của avatar (nếu còn trên đĩa), hoặc từ
+  kết quả đã lưu.
+- Nếu video nguồn không còn → `CHƯA CÓ DỮ LIỆU` (không đoán).
+- Nếu avatar chưa hoàn tất → không đánh giá chất lượng.
+- Không có điểm số giả (87/100…). Chỉ phân loại + điểm tốt/điểm yếu thật.
+
+Mỗi thẻ avatar hiện: thumbnail, tên, loại (Cận cảnh/Toàn thân), trạng thái kỹ
+thuật, nhãn chất lượng, điểm tốt (✓), điểm cần lưu ý (⚠), nút **Sử dụng Avatar**
+(chỉ bật khi SẴN SÀNG) và **Xem đánh giá chi tiết** (modal với 8 tiêu chí +
+khuyến nghị + thông tin kỹ thuật).
+
+### Hành vi Use Anyway (không chặn cứng)
+
+Cảnh báo chất lượng (khuôn mặt nhỏ, nhân vật đang nói trong nguồn, mờ, camera
+rung, ánh sáng) là **cảnh báo, không phải chặn**. Operator luôn có thể chọn
+**Vẫn sử dụng video này** khi tạo avatar; `user_override` được ghi lại.
+
+### Avatar CHƯA HOÀN TẤT
+
+Không thể chọn để render. Hiển thị `CHƯA HOÀN TẤT` + lý do (thiếu artifact).
+Không khẳng định chất lượng tốt/kém.
+
+### Tìm kiếm / lọc / sắp xếp thư viện
+
+Lọc: Tất cả / Rất tốt / Tốt / Có cảnh báo / Không khuyến nghị / Chưa có dữ
+liệu / Sẵn sàng / Chưa hoàn tất. Sắp xếp: Chất lượng tốt nhất / Mới nhất /
+Tên A–Z. Tìm theo tên. Nút **Đánh giá tất cả** chạy validator read-only cho
+mọi avatar còn video nguồn.
+
+### Kích thước khuôn mặt (khuyến nghị, không chặn)
+
+Nghiên cứu nguồn: mặt chuẩn production ≈ 0.116; khuyến nghị nguồn mới
+`face_h_ratio >= 0.16`. UI dịch sang tiếng người ("Khuôn mặt hơi nhỏ"…) và
+**không tự động loại** giá trị thấp — vẫn dùng được khi kỹ thuật khả thi.

@@ -19,6 +19,7 @@ from flask import (Flask, request, jsonify, send_file, send_from_directory,
 from . import config, db, gpu_service
 from . import envutil
 from . import avatar_service
+from . import avatar_quality
 from . import script_service
 from . import render_service
 from . import elevenlabs_client as el
@@ -115,6 +116,27 @@ def _dir_writable(path: str) -> bool:
 @app.route("/api/avatars")
 def list_avatars():
     return jsonify({"avatars": avatar_service.list_avatars()})
+
+
+@app.route("/api/avatars/quality/backfill", methods=["POST"])
+def avatars_quality_backfill():
+    """Evaluate (read-only validator) every prepared avatar that still has an
+    on-disk raw source. Caches the result. Never fabricates; missing-source
+    avatars stay CHƯA CÓ DỮ LIỆU."""
+    force = (request.get_json(silent=True) or {}).get("force", False)
+    return jsonify(avatar_quality.evaluate_all(force=force))
+
+
+@app.route("/api/avatars/<avatar_id>/quality", methods=["GET", "POST"])
+def avatar_quality_route(avatar_id):
+    """Return cached quality, or run a read-only validator on the avatar's raw
+    source (POST) and cache it. Honest no-data when the source is missing."""
+    if request.method == "POST":
+        force = (request.get_json(silent=True) or {}).get("force", False)
+        return jsonify(avatar_quality.evaluate_avatar(avatar_id, force=force))
+    # GET: cached first, else evaluate (without forcing a re-run)
+    q = avatar_quality.evaluate_avatar(avatar_id, force=False)
+    return jsonify(q)
 
 
 @app.route("/api/avatars/<avatar_id>/thumbnail")

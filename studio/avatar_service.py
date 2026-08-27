@@ -161,6 +161,20 @@ def list_avatars() -> List[Dict[str, Any]]:
         row = db.get_avatar(name)
         if row:
             item["quality"] = row.get("quality")
+        # build a compact, honest quality summary for the library card
+        from . import avatar_quality as aq
+        qd = None
+        if row and row.get("quality_data"):
+            try:
+                qd = json.loads(row["quality_data"])
+            except Exception:
+                qd = None
+        qsum = aq.quality_summary_for_list(qd)
+        item["quality_status"] = qsum["quality_status"]
+        item["quality_strengths"] = qsum["strengths"]
+        item["quality_warnings"] = qsum["warnings"]
+        item["quality_source"] = qsum["quality_source"]
+        item["face_h_ratio"] = qsum["face_h_ratio"]
         out.append(item)
     return out
 
