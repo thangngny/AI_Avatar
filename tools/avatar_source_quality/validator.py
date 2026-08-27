@@ -163,15 +163,16 @@ def analyze(path, n=8):
         cats["LIGHTING"] = {"status": "UNKNOWN", "value": 0.0,
                             "note": "insufficient frames for lighting analysis"}
     else:
-        # Lowered PASS threshold from 0.02 → 0.003 to catch subtle talking.
-        # Test set: test17_8/Close Up.mp4 talking_proxy=0.0052 (KNOWN TALKING)
-        # was falsely PASS at 0.02; now correctly WARN at 0.003.
-        if talking_proxy < 0.003:
-            ms, mn = "PASS", "STILL/neutral (ideal — no talking detected)"
-        elif talking_proxy < 0.02:
-            ms, mn = "WARN", "POSSIBLE_TALKING — mouth articulation detected"
+        # CALIBRATION-V1.1.4: talking_proxy does NOT reliably separate talking
+        # from non-talking in the 0.005–0.05 range. Known TALKING sources
+        # (0.0052, 0.0131, 0.0119) and known NEUTRAL sources (0.0099, 0.0183)
+        # OVERLAP. Marking this range UNKNOWN avoids both false positives and
+        # false negatives. Only ≥0.05 (well above any calibration source) is
+        # confidently WARN. Manual visual inspection is recommended.
+        if talking_proxy < 0.05:
+            ms, mn = "UNKNOWN", "AUTOMATED_TALKING_DETECTOR_UNRELIABLE — manual inspection recommended"
         elif talking_proxy < 0.09:
-            ms, mn = "WARN", "TALKING — subject speaking in source"
+            ms, mn = "WARN", "MOUTH_ARTICULATION — likely talking detected"
         else:
             ms, mn = "FAIL", "STRONG_TALKING/HIGH_EXPRESSION (poor master)"
         cats["SOURCE_MOUTH_STATE"] = {"status": ms, "value": round(talking_proxy, 4), "note": mn}
