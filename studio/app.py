@@ -18,6 +18,7 @@ from typing import Dict, Any
 
 from flask import (Flask, request, jsonify, send_file, send_from_directory,
                    abort, Response, session, redirect, url_for)
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from . import config, db, gpu_service
 from . import envutil
@@ -36,17 +37,36 @@ app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB upload cap
 # and held IN MEMORY ONLY. Sessions are invalidated when the Studio process
 # restarts (spec §13). Never persisted to disk.
 app.secret_key = secrets.token_hex(32)
-# Cookie hardening (spec §13). HttpOnly is on by default for Flask sessions.
-# SameSite=Lax is correct for the same-site SPA. Secure is gated to real TLS
-# origins: Cloudflare Quick Tunnel forwards plain HTTP to the loopback origin,
-# so a Secure cookie would be dropped over that HTTP hop — we enable Secure
-# only when the origin itself is HTTPS (e.g. a future named tunnel with a TLS
-# origin or a reverse proxy that sets X-Forwarded-Proto).
+# Cookie hardening (spec §13). HttpOnly + SameSite=Lax are static. The Secure
+# flag is set DYNAMICALLY per request (see _share_gate) to reflect proxy-
+# terminated TLS: True only when the request arrived over HTTPS — which, behind
+# the Cloudflare tunnel, is reported via X-Forwarded-Proto (made visible to
+# Flask by ProxyFix below). Local loopback HTTP (owner-direct) is never given a
+# Secure cookie, so local HTTP Studio behavior is unchanged.
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=bool(os.environ.get("STUDIO_SESSION_COOKIE_SECURE", "0") == "1"),
+    SESSION_COOKIE_SECURE=False,  # default for local/HTTP; set True per-request when behind TLS
 )
+
+# Trust EXACTLY ONE hop of Cloudflare's forwarded headers so request.is_secure /
+# request.scheme / request.host reflect the browser-facing HTTPS URL, not the
+# loopback HTTP hop from cloudflared to the origin.
+#
+# WHY THIS IS SAFE (do not widen it):
+#   * The Studio origin binds to 127.0.0.1 only (run_studio.py host=127.0.0.1).
+#     No external host can open a TCP connection to the origin, so no outside
+#     attacker can inject X-Forwarded-* headers directly.
+#   * The only forwarder is cloudflared running on the same host (loopback).
+#     Cloudflare OVERWRITES Cf-Connecting-IP and X-Forwarded-Proto on the
+#     edge; client-supplied values do not pass through.
+#   * x_for=1 / x_proto=1 / x_host=1 trust a single proxy hop. A local process
+#     could spoof X-Forwarded-Proto, but (a) that only affects the cookie Secure
+#     flag — no authz impact — and (b) the owner's machine is a trusted
+#     environment. The gate still keys off Cf-Connecting-IP (not spoofable from
+#     outside) for owner-vs-tunnel discrimination.
+# Do NOT raise these counts or expose the origin on 0.0.0.0.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 _WORKAROUND = None
 
@@ -128,6 +148,13 @@ def _is_owner_direct() -> bool:
 def _share_gate():
     if not share_auth.is_enabled():
         return None
+    # Reflect the browser-facing transport on the session cookie. Behind the
+    # Cloudflare tunnel, X-Forwarded-Proto: https (made visible by ProxyFix)
+    # makes request.is_secure True → the login cookie is emitted with Secure so
+    # the browser only sends it over HTTPS. Local loopback HTTP (owner-direct,
+    # exempt) stays is_secure=False → no Secure flag → local HTTP unaffected.
+    # Mutated per request; safe under the Studio's low concurrency.
+    app.config["SESSION_COOKIE_SECURE"] = bool(request.is_secure)
     # Owner direct loopback exemption: requests that did not traverse the
     # tunnel bypass the gate. Safe because the origin listens on 127.0.0.1
     # only — no external host can reach it without cloudflared.

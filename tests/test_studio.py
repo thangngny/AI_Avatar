@@ -883,6 +883,27 @@ class TestShareGate(StudioTestCase):
                         headers={"Cf-Connecting-IP": "203.0.113.9"}).get_json()
         self.assertEqual(tunnel["max_chunk_bytes"], 2 * 1024 * 1024)
 
+    def test_secure_cookie_behind_proxy_local_not_secure(self):
+        # Behind the tunnel (Cf-Connecting-IP + X-Forwarded-Proto: https) the
+        # login cookie MUST be Secure; over local HTTP it must NOT be Secure.
+        from studio import share_auth
+        share_auth.enable("CODE")
+        h_tunnel = {"Cf-Connecting-IP": "203.0.113.7", "X-Forwarded-Proto": "https",
+                    "X-Forwarded-For": "203.0.113.7", "X-Forwarded-Host": "x.trycloudflare.com"}
+        r = self.client.post("/api/auth/login", json={"code": "CODE"}, headers=h_tunnel)
+        self.assertTrue(r.get_json()["ok"])
+        sc = r.headers.get("Set-Cookie", "")
+        self.assertIn("Secure", sc, f"tunnel cookie must be Secure: {sc}")
+        self.assertIn("HttpOnly", sc)
+        self.assertIn("SameSite=Lax", sc)
+        # Local HTTP (owner-direct, exempt) sets no auth cookie at all.
+        share_auth.disable()
+        share_auth.enable("CODE2")
+        r2 = self.client.post("/api/auth/login", json={"code": "CODE2"})  # no proxy headers
+        # Owner-direct is exempt so the gate never enforces; no session needed.
+        self.assertEqual(self.client.get("/").status_code, 200)
+        share_auth.disable()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

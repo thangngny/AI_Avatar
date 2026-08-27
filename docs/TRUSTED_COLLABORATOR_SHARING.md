@@ -67,9 +67,15 @@ không ẩn Settings/History, không ép Edge-only, không cách ly avatar theo 
 Mục tiêu: **ngặn truy cập ngẫu nhiên** từ Internet, KHÔNG phải zero-trust doanh nghiệp.
 
 - **Mã truy cập** sinh bằng `secrets`, giữ **trong RAM** (không ghi disk, §29).
-- **Session cookie**: `HttpOnly`, `SameSite=Lax`; `Secure` bật khi origin là HTTPS
-  thực (Quick Tunnel chuyển HTTP tới loopback origin nên cookie qua tunnel không
-  có cờ Secure — đây là đặc điểm cố hữu của Quick Tunnel, không phải lỗ hổng).
+- **Session cookie**: `HttpOnly` + `SameSite=Lax` + `Secure`, tất cả đều bật
+  cho collaborator qua tunnel. Mặc dù Cloudflare Quick Tunnel chuyển HTTP tới
+  loopback origin, Flask nhận `X-Forwarded-Proto: https` qua `ProxyFix` (tin đúng
+  1 hop proxy), nên `request.is_secure = True` và cookie login được phát với cờ
+  `Secure` — trình duyệt chỉ gửi lại qua HTTPS. Owner ở localhost (HTTP, được
+  miễn) không nhận cookie → local không bị ép HTTPS. ProxyFix an toàn vì origin
+  chỉ bind 127.0.0.1 (không ai ngoài gửi được header X-Forwarded-* trực tiếp);
+  forwarder duy nhất là cloudflared trên cùng máy. Mã truy cập KHÔNG nằm trong
+  cookie (cookie chỉ chứa flag `authed` đã ký).
 - Session hết hạn khi **restart Studio** (secret_key sinh lại mỗi lần).
 - **Owner miễn đăng nhập** khi vào `127.0.0.1` trực tiếp (phân biệt qua header
   `Cf-Connecting-IP`: có = qua tunnel → cần đăng nhập; không có = owner local).
