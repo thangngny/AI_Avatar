@@ -836,6 +836,34 @@ class TestShareGate(StudioTestCase):
         r = self.client.get("/")
         self.assertEqual(r.status_code, 200)
 
+    def test_link_only_tunnel_direct_access_no_login(self):
+        # V1.2.2: default share mode is LINK ONLY (gate not armed). A tunnel
+        # caller (Cf-Connecting-IP) gets the SPA directly — no 401, no login
+        # page — and APIs work without a session cookie.
+        from studio import share_auth
+        share_auth.disable()  # link-only default
+        h = {"Cf-Connecting-IP": "203.0.113.7", "X-Forwarded-Proto": "https",
+             "X-Forwarded-For": "203.0.113.7"}
+        r = self.client.get("/", headers=h)
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("name=\"code\"", r.get_data(as_text=True))  # not the login page
+        self.assertIn("app.js", r.get_data(as_text=True))           # the SPA
+        # APIs work directly, no auth, no cookie.
+        s = self.client.get("/api/system/status", headers=h)
+        self.assertEqual(s.status_code, 200)
+        a = self.client.get("/api/avatars", headers=h)
+        self.assertEqual(a.status_code, 200)
+
+    def test_login_route_redirects_when_gate_off(self):
+        # With the gate off, /login must not show a login page; it redirects
+        # to the SPA (no auth step in link-only mode).
+        from studio import share_auth
+        share_auth.disable()
+        r = self.client.get("/login")
+        self.assertIn(r.status_code, (302, 200))
+        if r.status_code == 302:
+            self.assertEqual(r.headers.get("Location"), "/")
+
     def test_tunnel_requires_auth_and_login(self):
         from studio import share_auth
         share_auth.enable("TEST-CODE-1234")

@@ -22,7 +22,8 @@
 #>
 [CmdletBinding()]
 param(
-  [switch]$NoAuth,
+  [switch]$Auth,     # OPTIONAL: re-enable the legacy access-code gate. Default = LINK ONLY.
+  [switch]$NoAuth,   # Accepted for backward compat; forces link-only (already the default).
   [string]$StudioPy = "",
   [int]$Port = 8077
 )
@@ -92,8 +93,11 @@ if ($existing -and (Test-Studio $Port)) {
 
 # 4. localhost health (confirmed above)
 
-# 5. Generate access code + arm the gate
-$RequireAuth = -not $NoAuth
+# 5. Access mode: LINK ONLY by default (no access code, no login). The URL
+# itself is the temporary access mechanism. Optional -Auth re-enables the
+# legacy access-code gate for a stricter session.
+$RequireAuth = [bool]$Auth
+if ($NoAuth) { $RequireAuth = $false }  # backward compat (already the default)
 $AccessCode = ""
 if ($RequireAuth) {
   $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".ToCharArray()
@@ -108,9 +112,9 @@ if ($RequireAuth) {
     $er = Invoke-RestMethod "$Base/api/share/enable" -Method Post -ContentType "application/json" -Body $body -TimeoutSec 8 -ErrorAction Stop
     if (-not $er.share_enabled) { Bad "Khong arm duoc share gate."; $er | Out-String | Out-Null; exit 1 }
   } catch { Bad "Loi /api/share/enable: $_"; exit 1 }
-  Good "Share gate ARMED (auth ON)."
+  Good "Share gate ARMED (auth ON, legacy mode)."
 } else {
-  Warn "Auth OFF (--no-auth). URL cong khai - bat ky ai co link deu dung duoc."
+  Warn "LINK-ONLY: Bat ky ai co link nay deu co the su dung Studio trong thoi gian dang chia se."
 }
 
 # 6. Start Cloudflare Quick Tunnel
@@ -157,11 +161,10 @@ Out ""
 Out $line
 Head " AI AVATAR STUDIO - CHIA SE CHO CONG SU"
 Out $line
-Out " Studio:          ONLINE  ($Base)"
-Out " Link:            $PublicUrl"
-if ($RequireAuth) { Out " Ma truy cap:      $AccessCode" } else { Out " Ma truy cap:      (khong - auth OFF)" }
+Out " STATUS:          ONLINE"
+Out " PUBLIC LINK:     $PublicUrl"
+if ($RequireAuth) { Out " MA TRUY CAP:      $AccessCode  (che do -auth cu)" } else { Out " ACCESS:          FULL STUDIO - LINK ONLY" }
 Out ""
-Out " Quyen truy cap:   FULL STUDIO"
 Out " ElevenLabs:       ENABLED"
 Out " Edge TTS:         ENABLED"
 Out " Create Avatar:    ENABLED"
@@ -170,13 +173,15 @@ Out " History:          ENABLED"
 Out " Settings:         ENABLED"
 Out " GPU:              SAME LOCAL WORKSTATION"
 Out ""
-Warn " Nhan Ctrl+C de ngung chia se."
+if (-not $RequireAuth) { Warn " CANH BAO: Bat ky ai co link nay deu co the su dung Studio trong thoi gian dang chia se." }
+Warn " Nhan Ctrl+C hoac chay Stop Sharing de ngung chia se."
 Out $line
 
-$clip = "AI Avatar Studio`r`n`r`nLink:`r`n$PublicUrl`r`n"
+# Clipboard: link-only by default (no code). Legacy -Auth mode also includes the code.
+$clip = "AI Avatar Studio`r`n`r`nLink:`r`n$PublicUrl`r`n`r`n"
 if ($RequireAuth) { $clip += "Ma truy cap:`r`n$AccessCode`r`n`r`n" }
-$clip += "Ban co the su dung day du Studio:`r`nAvatar, ElevenLabs, Edge TTS, Render, History, Settings."
-try { Set-Clipboard -Value $clip; Good "Da copy thong tin chia se vao clipboard." } catch { Warn "Khong copy duoc vao clipboard." }
+$clip += "Mo link de su dung Studio."
+try { Set-Clipboard -Value $clip; Good "Da copy link vao clipboard." } catch { Warn "Khong copy duoc vao clipboard." }
 
 # 11. Keep alive until Ctrl+C; cleanup on exit
 $cleanup = {

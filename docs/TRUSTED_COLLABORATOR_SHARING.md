@@ -1,12 +1,16 @@
 # AI Avatar Studio — Chia sẻ cho cộng sự đáng tin cậy (Trusted Collaborator Sharing)
 
-> **Phiên bản:** V1.2.0 · Tag: `ai-avatar-studio-ui-v1.2.0`
-> **Chế độ:** TRUSTED COLLABORATOR — truy cập ĐẦY ĐỦ Studio sau khi đăng nhập.
+> **Phiên bản:** V1.2.2 · Tag: `ai-avatar-studio-ui-v1.2.2`
+> **Chế độ:** TRUSTED COLLABORATOR — LINK ONLY. Mở link là dùng được Studio đầy đủ.
 > Đây KHÔNG phải chế độ pilot người dùng công khai, KHÔNG phải demo hạn chế.
 
 Studio vẫn là **MỘT ứng dụng duy nhất**. Cloudflare Quick Tunnel chỉ là phương tiện
 truy cập từ xa — không tách rành ngạch tính năng (local feature set vs remote
-feature set). Sau khi đăng nhập, cộng sự dùng Studio giống hệt owner ở localhost.
+feature set). Cộng sự mở link và dùng Studio giống hệt owner ở localhost.
+
+> **Không có mã truy cập trong chế độ chia sẻ mặc định.** Bất kỳ ai có link
+> đang hoạt động đều có thể dùng Studio. Đây là quyết định của owner (TRUSTED
+> COLLABORATOR MODE); URL rotation mỗi phiên là ranh giới thực tế duy nhất.
 
 ---
 
@@ -27,28 +31,29 @@ Cộng sự và owner nhìn thấy **cùng** mọi thứ — không tách tài k
 
 ---
 
-## 2. Cách dùng (operator)
+## 2. Cách dùng (operator) — LINK ONLY
 
 1. **Double-click** `AI_Avatar_Studio_Share.bat`.
 2. Đợi ~10–20 giây. Script sẽ:
    - kiểm tra repo + cloudflared,
    - khởi động Studio nếu chưa chạy (nếu đang chạy thì dùng lại, không dừng),
-   - sinh mã truy cập ngẫu nhiên (in-memory, không ghi disk),
    - mở Cloudflare Quick Tunnel,
-   - in link + mã truy cập và **copy vào clipboard**.
-3. Gửi **link + mã truy cập** cho cộng sự.
-4. Cộng sự mở link → nhập mã → dùng đầy đủ Studio.
-5. **Ctrl+C** trong cửa sổ launcher (hoặc chạy `AI_Avatar_Studio_Stop_Sharing.bat`)
-   để ngừng chia sẻ. URL cũ lập tức không truy cập được.
+   - in **PUBLIC LINK** và **copy link vào clipboard** (không có mã truy cập).
+3. Gửi **PUBLIC LINK** cho cộng sự.
+4. Cộng sự mở link → Studio mở ngay, dùng đầy đủ. **Không đăng nhập, không mã.**
+5. **Ctrl+C** (hoặc chạy `AI_Avatar_Studio_Stop_Sharing.bat`) để ngừng chia sẻ.
+   URL cũ lập tức không truy cập được.
 
-> Mặc định **AUTH ON** (vì URL trycloudflare là URL Internet công khai).
-> Tắt nếu thật sự cần: `AI_Avatar_Studio_Share.bat --no-auth`.
+> Mặc định: **LINK ONLY** (không mã truy cập, không login). Bất kỳ ai có link đều
+> dùng được Studio trong thời gian đang chia sẻ.
+>
+> Nếu muốn bật lại cổng mã truy cập (legacy, tùy chọn): `AI_Avatar_Studio_Share.bat --auth`.
 
 ---
 
 ## 3. Cộng sự dùng gì
 
-Sau đăng nhập, cộng sự có **đầy đủ** quyền giống owner:
+Sau khi mở link (không đăng nhập), cộng sự có **đầy đủ** quyền giống owner:
 
 - Tạo video nhanh (Quick Render) · Tạo AI Avatar mới · Thư viện AI Avatar · Lịch sử render · Cài đặt · Trạng thái hệ thống.
 - ElevenLabs: chọn/nhập Voice ID, check giọng, preview, **render production dùng cùng quota** đã cấu hình.
@@ -64,27 +69,19 @@ không ẩn Settings/History, không ép Edge-only, không cách ly avatar theo 
 
 ## 4. Bảo mật (phạm vi hẹp)
 
-Mục tiêu: **ngặn truy cập ngẫu nhiên** từ Internet, KHÔNG phải zero-trust doanh nghiệp.
+Mục tiêu: chia sẻ tạm thời cho cộng sự đáng tin cậy. **Không** phải zero-trust.
 
-- **Mã truy cập** sinh bằng `secrets`, giữ **trong RAM** (không ghi disk, §29).
-- **Session cookie**: `HttpOnly` + `SameSite=Lax` + `Secure`, tất cả đều bật
-  cho collaborator qua tunnel. Mặc dù Cloudflare Quick Tunnel chuyển HTTP tới
-  loopback origin, Flask nhận `X-Forwarded-Proto: https` qua `ProxyFix` (tin đúng
-  1 hop proxy), nên `request.is_secure = True` và cookie login được phát với cờ
-  `Secure` — trình duyệt chỉ gửi lại qua HTTPS. Owner ở localhost (HTTP, được
-  miễn) không nhận cookie → local không bị ép HTTPS. ProxyFix an toàn vì origin
-  chỉ bind 127.0.0.1 (không ai ngoài gửi được header X-Forwarded-* trực tiếp);
-  forwarder duy nhất là cloudflared trên cùng máy. Mã truy cập KHÔNG nằm trong
-  cookie (cookie chỉ chứa flag `authed` đã ký).
-- Session hết hạn khi **restart Studio** (secret_key sinh lại mỗi lần).
-- **Owner miễn đăng nhập** khi vào `127.0.0.1` trực tiếp (phân biệt qua header
-  `Cf-Connecting-IP`: có = qua tunnel → cần đăng nhập; không có = owner local).
-  An toàn vì origin chỉ nghe trên 127.0.0.1 — không ai ngoài truy cập trực tiếp.
-- Endpoint admin `/api/share/enable|disable` chỉ owner-direct (loopback, không
-  qua tunnel) gọi được → cộng sự không thể tắt/mở gate.
+- **LINK ONLY (mặc định): không có mã truy cập, không login.** Bất kỳ ai có link
+  đang hoạt động đều dùng được Studio. Owner chấp nhận điều này. URL đổi mỗi
+  phiên (Quick Tunnel random subdomain) là ranh giới thực tế chính.
+- Cổng mã truy cập (legacy, tùy chọn `--auth`) vẫn còn nếu owner muốn khép kín:
+  mã sinh bằng `secrets`, giữ trong RAM, session cookie `Secure; HttpOnly;
+  SameSite=Lax` qua tunnel nhờ `ProxyFix` (X-Forwarded-Proto). Mặc định KHÔNG bật.
 - **Không** trả plaintext API key ElevenLabs về browser; giữ nguyên masking sẵn có.
 - **Không** endpoint filesystem tùy ý, giữ path-traversal guard `_within_allowed`.
 - **Không** lộ đường dẫn raw-source gốc cho remote (sample ẩn `source_path` qua tunnel).
+- `ProxyFix` (1 hop) vẫn giữ cho hành vi HTTPS bên ngoài đúng đắn
+  (`request.is_secure`, scheme, host). An toàn vì origin chỉ bind 127.0.0.1.
 
 ---
 
@@ -92,10 +89,11 @@ Mục tiêu: **ngặn truy cập ngẫu nhiên** từ Internet, KHÔNG phải ze
 
 Cloudflare Free proxy giới hạn ~100 MB/request. Upload raw source qua tunnel dùng
 **chunked upload**: `POST /api/uploads/init` → lặp `POST /api/uploads/<id>/chunk`
-(chunk 16 MiB, dưới ngưỡng Cloudflare) → `POST /api/uploads/<id>/complete` (ghép
-nguyên tử + SHA1 vào `data/input/avatar_sources/`), rồi đưa path local cho
-**pipeline analyze/prepare hiện có** (không tạo importer thứ hai). UI hiển thị
-"ĐANG TẢI VIDEO 43% · Chunk 11/26". Cùng uploader dùng cho cả local và remote.
+(chunk transport-aware: 2 MiB qua tunnel để dưới timeout ~100s 524, 16 MiB local)
+→ `POST /api/uploads/<id>/complete` (ghép nguyên tử + SHA1 vào
+`data/input/avatar_sources/`), rồi đưa path local cho **pipeline analyze/prepare
+hiện có** (không tạo importer thứ hai). UI hiển thị "ĐANG TẢI VIDEO 43% · Chunk
+11/26", retry từng chunk lỗi. Cùng uploader dùng cho cả local và remote.
 
 ---
 
@@ -112,10 +110,11 @@ nguyên tử + SHA1 vào `data/input/avatar_sources/`), rồi đưa path local c
 ## 7. Dừng & lưu ý
 
 - Ctrl+C hoặc `AI_Avatar_Studio_Stop_Sharing.bat` chỉ dừng **cloudflared của phiên
-  này** + tắt gate; chỉ dừng Studio nếu **launcher tự khởi động** nó (ghi trong
-  `diagnostics/share_runtime.json`). Không bao giờ `taskkill /IM python.exe`.
+  này** (+ tắt gate nếu đang ở chế độ `--auth`); chỉ dừng Studio nếu **launcher
+  tự khởi động** nó (ghi trong `diagnostics/share_runtime.json`). Không bao giờ
+  `taskkill /IM python.exe`.
 - `diagnostics/share_runtime.json` chỉ lưu PID/URL/thời gian — **không** lưu mã
-  truy cập hay API key.
+  truy cập hay API key (mặc định không có mã nào cả).
 - **URL đổi mỗi phiên** (Quick Tunnel sinh random subdomain).
 - Quick Tunnel dành cho dev/test tạm thời. Muốn URL ổn định lâu dài: dùng
   **Named Cloudflare Tunnel** + hostname tùy chỉnh (sau này).
@@ -127,7 +126,7 @@ nguyên tử + SHA1 vào `data/input/avatar_sources/`), rồi đưa path local c
 ```
 Cộng sự (browser) ──HTTPS──> Cloudflare Quick Tunnel ──> 127.0.0.1:8077
                                                               │
-                 [ shared access gate (optional, auth ON) ]    │
+        [ access gate: OFF mặc định (LINK ONLY) | ON nếu --auth ]
                                                               ▼
                                               ── MỘT Flask controller ──
                                        (cùng SQLite, avatars, ElevenLabs,
