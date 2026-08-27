@@ -11,10 +11,32 @@ import json
 import shutil
 import subprocess
 import threading
+import time
 from typing import Dict, Any, List, Optional
 
 from . import config
 from . import db
+from . import runtime
+
+
+def _time_monotonic() -> float:
+    return time.monotonic()
+
+
+def _terminate_tree(proc: subprocess.Popen) -> None:
+    """Terminate a subprocess and its child tree cleanly. Best-effort."""
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           capture_output=True, timeout=15)
+        else:
+            import signal
+            proc.terminate()
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 # Required on-disk artifacts for a prepared avatar to be READY (matches
 # utils/avatar_validate.py + system_status.py).
@@ -22,22 +44,11 @@ REQUIRED_ARTIFACTS = ("full_imgs", "coords.pkl", "latents.pt",
                      "mask_coords.pkl", "avator_info.json")
 REQUIRED_DIR_ARTIFACTS = ("full_imgs", "mask")
 
-# Subprocess env for the torch tools. We strip the studio's GPU env vars so the
-# child resolves its own device from CUDA_VISIBLE_DEVICES (set per-job).
-_PYTHON = None
-
 
 def _torch_python() -> str:
-    """The python that has torch + the musetalk stack. Resolved once."""
-    global _PYTHON
-    if _PYTHON is None:
-        # The validated render env (only env on this machine with torch).
-        _PYTHON = r"C:\CongThang\AI_avatar\latentsync_env\Scripts\python.exe"
-        if not os.path.exists(_PYTHON):
-            # Fallback: let PATH choose (less safe, but works if the env is
-            # activated by the launcher).
-            _PYTHON = "python"
-    return _PYTHON
+    """The torch-capable interpreter. Resolved centrally via studio.runtime
+    (single source of truth; overridable via STUDIO_TORCH_PYTHON)."""
+    return runtime.torch_python()
 
 
 def _is_excluded(name: str) -> bool:
@@ -112,9 +123,12 @@ def _creation_time(avatar_dir: str) -> Optional[float]:
 
 
 def list_avatars() -> List[Dict[str, Any]]:
-    """List prepared avatars under data/avatars/. Excludes .uploads, raw
-    sources, logs, incomplete folders. Each item carries READY state validated
-    from required artifacts."""
+    """List avatar directories under data/avatars/. Excludes .uploads and
+    dotfiles (raw sources / logs). Each item carries an artifact-validated
+    status: "READY" (artifact-complete, v15) or "INCOMPLETE" (missing required
+    artifacts). Incomplete dirs are listed (so the operator can see them and
+    re-prepare) but are NOT selectable for rendering (the UI gates on
+    status=="READY"). No data is deleted."""
     out = []
     if not os.path.isdir(config.AVATARS_ROOT):
         return out
@@ -132,6 +146,7 @@ def list_avatars() -> List[Dict[str, Any]]:
             "name": name,
             "avatar_type": _avatar_type(name, info),
             "ready": ready,
+            "status": "READY" if ready else "INCOMPLETE",
             "thumbnail": f"/api/avatars/{name}/thumbnail",
             "quality": None,
             "source_video": (info or {}).get("video_path"),
@@ -148,6 +163,18 @@ def list_avatars() -> List[Dict[str, Any]]:
             item["quality"] = row.get("quality")
         out.append(item)
     return out
+
+
+def avatar_counts() -> Dict[str, int]:
+    """TOTAL_DIRS / READY_AVATARS / INCOMPLETE_AVATARS for the system status
+    view. Only non-excluded dirs are counted."""
+    av = list_avatars()
+    ready = sum(1 for a in av if a["ready"])
+    return {
+        "total_dirs": len(av),
+        "ready_avatars": ready,
+        "incomplete_avatars": len(av) - ready,
+    }
 
 
 def avatar_thumbnail_path(avatar_id: str) -> Optional[str]:
@@ -342,19 +369,28 @@ class PrepJob:
         self.stage = "Starting..."
         self.error = None
         self.done = False
+        self.timed_out = False
+        self.pid = None
         self._stdout = []
         self._lock = threading.Lock()
 
     def start(self):
         config.ensure_runtime_dirs()
         self.log_path = os.path.join(config.LOG_DIR, f"prep_{self.avatar_id}.log")
-        cmd = [_torch_python(), config.GENAVATAR,
+        # Run genavatar as a MODULE from the repo root so `avatars.*` /
+        # `utils.*` resolve (the script itself does not add the repo root to
+        # sys.path, unlike generate_video_from_script.py). `python -m
+        # avatars.musetalk.genavatar` puts the repo root (cwd) on sys.path[0]
+        # and runs the canonical __main__ block. PYTHONPATH is also set as a
+        # belt-and-suspenders guarantee. No MuseTalk code is copied.
+        cmd = [_torch_python(), "-m", "avatars.musetalk.genavatar",
                "--file", self.video_path,
                "--avatar_id", self.avatar_id,
                "--version", "v15",
                "--parsing_mode", "jaw",
                "--bbox_shift", "0"]
         env = os.environ.copy()
+        env["PYTHONPATH"] = runtime.repo_root() + os.pathsep + env.get("PYTHONPATH", "")
         # Use a free GPU if the scheduler exposes one; default GPU 0 (single).
         gid = env.get("STUDIO_PREP_GPU_ID", "0")
         env["CUDA_VISIBLE_DEVICES"] = gid
@@ -363,8 +399,9 @@ class PrepJob:
         try:
             self.proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
                                          stderr=subprocess.STDOUT, text=True,
-                                         cwd=config.ROOT, env=env,
+                                         cwd=runtime.repo_root(), env=env,
                                          encoding="utf-8", errors="replace")
+            self.pid = self.proc.pid
         except Exception as e:
             self.error = f"Failed to start preparation: {e}"
             self.done = True
@@ -372,6 +409,12 @@ class PrepJob:
         threading.Thread(target=self._pump, daemon=True).start()
 
     def _pump(self):
+        # Generous bounded timeout for avatar preparation (loads MuseTalk +
+        # face parsing + VAE latents for every frame). Default 30 min; override
+        # via STUDIO_PREP_TIMEOUT_SEC. A slow but progressing job is NOT killed
+        # merely for being slow — the timeout is a hard backstop against hangs.
+        timeout = float(os.environ.get("STUDIO_PREP_TIMEOUT_SEC", "1800"))
+        deadline = _time_monotonic() + timeout
         try:
             with open(self.log_path, "w", encoding="utf-8") as logf:
                 for line in self.proc.stdout:
@@ -382,12 +425,21 @@ class PrepJob:
                     stage = _match_stage(line)
                     if stage:
                         self.stage = stage
+                    if _time_monotonic() > deadline:
+                        self.timed_out = True
+                        _terminate_tree(self.proc)
+                        break
         except Exception as e:
             with self._lock:
                 self.error = f"Log pump error: {e}"
-        self.proc.wait()
+        try:
+            self.proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            _terminate_tree(self.proc)
         rc = self.proc.returncode
-        if rc != 0:
+        if self.timed_out:
+            self.error = "Preparation timed out (hung process terminated)."
+        elif rc != 0:
             self.error = self.error or f"Preparation process exited with code {rc}."
         self.done = True
 
@@ -426,8 +478,10 @@ def get_prep_status(avatar_id: str) -> Dict[str, Any]:
                 "exists": False, "error": "No such preparation job."}
     return {"done": job.done, "ready": job.done and _check_ready(
                 os.path.join(config.AVATARS_ROOT, avatar_id)),
-            "stage": job.stage if not job.done else ("done" if not job.error else "failed"),
-            "error": job.error, "log_path": job.log_path}
+            "stage": job.stage if not job.done else (
+                "timed_out" if job.timed_out else ("done" if not job.error else "failed")),
+            "error": job.error, "log_path": job.log_path,
+            "timed_out": job.timed_out, "pid": job.pid}
 
 
 def get_prep_log_tail(avatar_id: str, n: int = 30) -> str:

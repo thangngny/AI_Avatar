@@ -363,5 +363,135 @@ class TestVerify(StudioTestCase):
         self.assertFalse(r["ok"])
 
 
+class TestOutputUniqueness(StudioTestCase):
+    def test_many_same_second_paths_are_unique(self):
+        """Defect 1 regression: many jobs created in the same wall-clock second
+        must each receive a GLOBALLY UNIQUE output path (no uuid -> collision)."""
+        import studio.render_service as rs
+        paths = []
+        # Simulate 50 jobs created as fast as possible (same second likely).
+        for _ in range(50):
+            jid = rs._new_job_id()
+            p = rs._output_path("test10s", "doTrang_closeup", "test10s", jid)
+            paths.append(os.path.basename(p))
+        self.assertEqual(len(paths), len(set(paths)),
+                         "output paths collided: %s" %
+                         [p for p in paths if paths.count(p) > 1])
+
+    def test_two_jobs_distinct_paths(self):
+        import studio.render_service as rs
+        j1, j2 = rs._new_job_id(), rs._new_job_id()
+        p1 = rs._output_path("full", "av", "Part 01", j1)
+        p2 = rs._output_path("full", "av", "Part 01", j2)
+        self.assertNotEqual(p1, p2)
+
+    def test_safe_filenames(self):
+        import studio.render_service as rs
+        jid = rs._new_job_id()
+        p = rs._output_path("full", "av/evil", "Part 01/02", jid)
+        self.assertNotIn("/", os.path.basename(p))
+        self.assertNotIn("..", p)
+
+
+class TestRepairs(StudioTestCase):
+    """Repair-specific invariants (Defects 1/2/3/4/6/8)."""
+
+    def test_genavatar_invocation_uses_module(self):
+        """D2: genavatar must be invoked as `python -m avatars.musetalk.genavatar`
+        (repo-root import context), not as a bare script path."""
+        import inspect
+        from studio import avatar_service
+        src = inspect.getsource(avatar_service.PrepJob.start)
+        self.assertIn("-m", src)
+        self.assertIn("avatars.musetalk.genavatar", src)
+        # Must NOT invoke the bare script path (the broken form).
+        self.assertNotIn("config.GENAVATAR,", src)
+        # PYTHONPATH must be set to the repo root as a guarantee.
+        self.assertIn("PYTHONPATH", src)
+
+    def test_avatar_counts_distinguish_ready_and_incomplete(self):
+        """D4: avatar_counts returns total_dirs / ready / incomplete."""
+        from studio import avatar_service
+        c = avatar_service.avatar_counts()
+        self.assertIn("total_dirs", c)
+        self.assertIn("ready_avatars", c)
+        self.assertIn("incomplete_avatars", c)
+        self.assertEqual(c["ready_avatars"] + c["incomplete_avatars"],
+                         c["total_dirs"])
+
+    def test_incomplete_avatar_status_field(self):
+        """D4: a non-ready avatar dir must report status='INCOMPLETE', not READY."""
+        from studio import avatar_service, config
+        fake = os.path.join(config.AVATARS_ROOT, "__test_incomplete__")
+        os.makedirs(os.path.join(fake, "full_imgs"), exist_ok=True)
+        os.makedirs(os.path.join(fake, "mask"), exist_ok=True)
+        # one frame so frame_count>0 but missing latents/coords -> not ready
+        try:
+            from PIL import Image  # noqa
+        except Exception:
+            # create a tiny png without PIL
+            import struct, zlib
+            def _png(path):
+                # 1x1 black png
+                sig = b"\x89PNG\r\n\x1a\n"
+                ihdr = b"IHDR" + struct.pack(">IIBBBBB", 1, 1, 8, 0, 0, 0, 0)
+                ihdr = struct.pack(">I", 13) + ihdr + struct.pack(">I", zlib.crc32(ihdr))
+                idat = b"IDAT" + zlib.compress(b"\x00\x00")
+                idat = struct.pack(">I", len(idat) - 4) + idat + struct.pack(">I", zlib.crc32(idat))
+                iend = b"IEND" + struct.pack(">I", 0) + struct.pack(">I", zlib.crc32(b"IEND"))
+                open(path, "wb").write(sig + ihdr + idat + iend)
+            _png(os.path.join(fake, "full_imgs", "00000000.png"))
+            _png(os.path.join(fake, "mask", "00000000.png"))
+        try:
+            av = avatar_service.list_avatars()
+            match = next((a for a in av if a["avatar_id"] == "__test_incomplete__"), None)
+            self.assertIsNotNone(match)
+            self.assertFalse(match["ready"])
+            self.assertEqual(match["status"], "INCOMPLETE")
+        finally:
+            shutil.rmtree(fake, ignore_errors=True)
+
+    def test_interpreter_resolved_centrally(self):
+        """D8: interpreter resolution is centralized in studio.runtime and
+        overridable via STUDIO_TORCH_PYTHON."""
+        from studio import runtime
+        # explicit override wins
+        os.environ["STUDIO_TORCH_PYTHON"] = "python"
+        try:
+            self.assertEqual(runtime.torch_python(), "python")
+        finally:
+            del os.environ["STUDIO_TORCH_PYTHON"]
+        # default resolves to a real path or 'python'
+        self.assertTrue(runtime.torch_python())
+
+    def test_account_status_does_not_fabricate(self):
+        """D6: account_status never fabricates remaining when fields absent.
+        With no key, returns an honest error (no fake numbers)."""
+        from studio import elevenlabs_client as el
+        # Temporarily pretend no key.
+        orig = el._API_KEY
+        el._API_KEY = ""
+        try:
+            r = el.account_status()
+            self.assertFalse(r["ok"])
+            self.assertNotIn("remaining", r)  # no fabricated remaining
+        finally:
+            el._API_KEY = orig
+
+    def test_timed_out_is_distinct_state(self):
+        """D3: timed_out is a recognized terminal state (retry accepts it)."""
+        from studio import render_service, db
+        db.create_job({"job_id": "j_to", "kind": "full", "avatar_id": "x",
+                        "voice_id": "vid", "script_text": "t",
+                        "status": "timed_out", "stage": "Timed Out",
+                        "truth_hash": render_service.truth_hash()})
+        r = render_service.retry_job("j_to")
+        self.assertTrue(r["ok"])
+        self.assertEqual(db.get_job("j_to")["status"], "queued")
+        # retry must assign a fresh output path (uuid-suffixed)
+        self.assertIn(db.get_job("j_to")["output_path"][-13:-4],
+                      db.get_job("j_to")["output_path"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

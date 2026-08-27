@@ -31,6 +31,7 @@ from . import config, db, gpu_service
 from . import elevenlabs_client as el
 from . import avatar_service
 from . import verify as verify_mod
+from . import runtime
 from .avatar_service import _torch_python
 
 
@@ -135,16 +136,43 @@ def _new_job_id() -> str:
     return f"job_{int(time.time())}_{uuid.uuid4().hex[:8]}"
 
 
-def _output_path(kind: str, avatar_id: str, label: str) -> str:
+def _uuid_from_job_id(job_id: str) -> str:
+    """Extract the unique 8-char uuid suffix from a job_id
+    (`job_<ts>_<uuid8>`). Falls back to a fresh uuid if the shape is unexpected."""
+    try:
+        return job_id.rsplit("_", 1)[-1]
+    except Exception:
+        return uuid.uuid4().hex[:8]
+
+
+def _output_path(kind: str, avatar_id: str, label: str,
+                 job_id: Optional[str] = None) -> str:
     """Production render output under D:\\CongThang_AI_Avatar\\renders\\studio\\.
-    Label-safe filename. Never into Git-tracked source."""
+
+    Globally unique per job: the filename embeds the job's uuid suffix, so two
+    jobs created in the same wall-clock second (e.g. concurrent multi-GPU jobs)
+    can NEVER resolve to the same path. Uniqueness does NOT depend only on the
+    wall clock. An existence guard additionally avoids overwriting any existing
+    real artifact (retry safety).
+    """
     config.ensure_renders_dir()
     base_dir = os.path.join(config.RENDERS_DIR, "studio")
     os.makedirs(base_dir, exist_ok=True)
-    safe = re.sub(r"[^A-Za-z0-9_]+", "_", label).strip("_") or "render"
+    safe_avatar = re.sub(r"[^A-Za-z0-9_]+", "_", avatar_id).strip("_") or "avatar"
+    safe_label = re.sub(r"[^A-Za-z0-9_]+", "_", label).strip("_") or "render"
     ts = time.strftime("%Y%m%d_%H%M%S")
-    name = f"{ts}_{kind}_{avatar_id}_{safe}.mp4"
-    return os.path.join(base_dir, name)
+    suffix = _uuid_from_job_id(job_id) if job_id else uuid.uuid4().hex[:8]
+    name = f"{ts}_{kind}_{safe_avatar}_{safe_label}_{suffix}.mp4"
+    path = os.path.join(base_dir, name)
+    # Existence guard: never silently overwrite an existing non-trivial file.
+    # (Normal jobs never collide because of the uuid; this only protects against
+    # an explicit retry whose target already exists.)
+    n = 2
+    while os.path.exists(path) and os.path.getsize(path) > 1000:
+        path = os.path.join(base_dir,
+                            f"{ts}_{kind}_{safe_avatar}_{safe_label}_{suffix}_{n}.mp4")
+        n += 1
+    return path
 
 
 def create_test_job(avatar_id: str, voice_id: str, script_text: str,
@@ -160,7 +188,7 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         return {"ok": False, "error": "Script is empty."}
 
     job_id = _new_job_id()
-    out = _output_path("test10s", avatar_id, "test10s")
+    out = _output_path("test10s", avatar_id, "test10s", job_id)
     db.create_job({
         "job_id": job_id, "kind": "test10s", "avatar_id": avatar_id,
         "voice_id": voice_id, "voice_meta": json.dumps(voice_meta, ensure_ascii=False) if voice_meta else None,
@@ -193,7 +221,7 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
     job_ids = []
     for part in sp["parts"]:
         job_id = _new_job_id()
-        out = _output_path("full", avatar_id, part["label"])
+        out = _output_path("full", avatar_id, part["label"], job_id)
         db.create_job({
             "job_id": job_id, "kind": "full", "avatar_id": avatar_id,
             "voice_id": voice_id,
@@ -213,14 +241,18 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
 
 def retry_job(job_id: str) -> Dict[str, Any]:
     """Re-queue a FAILED job. Does NOT touch successful jobs. Preserves the
-    original voice/avatar/config (never silently changes them)."""
+    original voice/avatar/config (never silently changes them). A retry gets a
+    FRESH output path (new uuid) so it can never silently overwrite a previous
+    artifact, even if one somehow exists at the old path."""
     job = db.get_job(job_id)
     if not job:
         return {"ok": False, "error": "Job not found."}
-    if job["status"] not in ("failed", "cancelled"):
-        return {"ok": False, "error": "Only failed/cancelled jobs can be retried."}
+    if job["status"] not in ("failed", "cancelled", "timed_out"):
+        return {"ok": False, "error": "Only failed/cancelled/timed_out jobs can be retried."}
+    new_out = _output_path(job["kind"], job["avatar_id"],
+                           job.get("script_name") or job["kind"], job_id)
     db.update_job(job_id, status="queued", progress=0, stage="Queued",
-                  error=None)
+                  error=None, output_path=new_out)
     _wake_worker()
     return {"ok": True, "job_id": job_id}
 
@@ -379,11 +411,39 @@ def _run_job(job_id: str, gpu_id: int) -> None:
 
     db.update_job(job_id, pid=proc.pid)
     last_pct = 5
+    # Progress-aware timeout: a watchdog kills the renderer only if it produces
+    # NO stdout for STUDIO_RENDER_NO_PROGRESS_SEC (default 300s). A slow but
+    # progressing long render is NOT killed — only a truly hung process is.
+    # Plus a hard backstop STUDIO_RENDER_HARD_TIMEOUT_SEC (default 14400s/4h).
+    no_progress_timeout = float(os.environ.get("STUDIO_RENDER_NO_PROGRESS_SEC", "300"))
+    hard_timeout = float(os.environ.get("STUDIO_RENDER_HARD_TIMEOUT_SEC", "14400"))
+    start = time.monotonic()
+    last_activity = {"t": time.monotonic()}
+    timed_out = {"flag": False}
+
+    def _watchdog():
+        while proc.poll() is None:
+            time.sleep(5)
+            now = time.monotonic()
+            if now - last_activity["t"] > no_progress_timeout:
+                timed_out["flag"] = True
+                runtime.terminate_tree(proc)
+                return
+            if now - start > hard_timeout:
+                timed_out["flag"] = True
+                runtime.terminate_tree(proc)
+                return
+
+    import threading as _th
+    wd = _th.Thread(target=_watchdog, daemon=True)
+    wd.start()
+
     try:
         with open(log_path, "w", encoding="utf-8") as logf:
             for line in proc.stdout:
                 logf.write(line)
                 logf.flush()
+                last_activity["t"] = time.monotonic()
                 m = _TQDM.search(line)
                 if m:
                     pct = int(m.group(1))
@@ -400,10 +460,21 @@ def _run_job(job_id: str, gpu_id: int) -> None:
                             last_pct = pct
                             db.update_job(job_id, progress=pct)
                         break
-        proc.wait()
+        proc.wait(timeout=60)
     except Exception as e:
         db.update_job(job_id, status="failed", stage="Failed",
                       error=f"Renderer error: {e}")
+        gpu_service.release(gpu_id)
+        return
+
+    if timed_out["flag"]:
+        try:
+            proc.wait(timeout=15)
+        except Exception:
+            runtime.terminate_tree(proc)
+        db.update_job(job_id, status="timed_out", stage="Timed Out", progress=0,
+                      error="Renderer hung (no progress for %.0fs) — terminated."
+                            % no_progress_timeout)
         gpu_service.release(gpu_id)
         return
 

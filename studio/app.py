@@ -74,7 +74,7 @@ def system_status():
     from .render_service import load_truth
     truth = load_truth()
     avatars = avatar_service.list_avatars()
-    ready_count = sum(1 for a in avatars if a["ready"])
+    counts = avatar_service.avatar_counts()
     gpus = gpu_service.status()
     return jsonify({
         "renderer_ready": os.path.exists(config.RENDERER),
@@ -90,8 +90,9 @@ def system_status():
         "truth": truth.get("truth") if truth["ok"] else None,
         "truth_hash": truth.get("hash") if truth["ok"] else None,
         "truth_error": truth.get("error"),
-        "avatar_count": len(avatars),
-        "ready_avatars": ready_count,
+        "avatar_total_dirs": counts["total_dirs"],
+        "ready_avatars": counts["ready_avatars"],
+        "incomplete_avatars": counts["incomplete_avatars"],
         "active_jobs": [j for j in db.list_active_jobs()],
     })
 
@@ -409,6 +410,14 @@ def settings_get():
         "elevenlabs_model_id": el.model_id(),
         "renders_dir": config.RENDERS_DIR,
     })
+
+
+@app.route("/api/elevenlabs/quota")
+def elevenlabs_quota():
+    """LIVE account/subscription status (uncached, non-fabricating). Returns
+    the real character_count/character_limit/remaining + reset date, or an
+    honest error. Used by the Settings view."""
+    return jsonify(el.account_status())
 
 
 @app.route("/api/settings/elevenlabs", methods=["POST"])

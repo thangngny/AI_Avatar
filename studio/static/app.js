@@ -377,7 +377,7 @@ async function renderLibrary() {
         <div class="name">${esc(a.avatar_id)}</div>
         <div class="sub">${esc(a.avatar_type)} · ${a.frame_count} frames</div>
         <div class="sub" style="margin-top:6px">
-          <span class="tag ${a.ready ? "good" : "bad"}">${a.ready ? "READY" : "NEEDS CHECK"}</span>
+          <span class="tag ${a.ready ? "good" : "bad"}">${a.ready ? "READY" : "INCOMPLETE"}</span>
           ${a.quality ? `<span class="tag ${a.quality === "PASS" ? "good" : a.quality === "WARN" ? "warn" : "bad"}">${esc(a.quality)}</span>` : ""}
         </div>
         <div class="actions" style="margin-top:10px">
@@ -474,6 +474,7 @@ async function renderSettings() {
       <div class="kv"><span class="k">Connection</span><span class="v">${s.elevenlabs_connected ? '<span style="color:var(--good)">● Connected</span>' : '<span style="color:var(--bad)">● Not connected</span>'}</span></div>
       <div class="kv"><span class="k">API Key</span><span class="v">${esc(s.elevenlabs_key_masked)}</span></div>
       <div class="kv"><span class="k">TTS Model</span><span class="v">${esc(el_model_id())}</span></div>
+      <div id="quotaRow" class="kv"><span class="k">Account quota</span><span class="v muted">checking…</span></div>
       <div style="margin-top:14px">
         <label>Update API Key (stored in .env, never logged)</label>
         <div class="row"><input id="sKey" type="password" placeholder="New ElevenLabs API key" style="flex:1" />
@@ -499,6 +500,14 @@ async function renderSettings() {
       <div class="kv"><span class="k">Long-audio WOLA</span><span class="v">${s.truth.long_audio_wola ? "ON" : "OFF"}</span></div>
       <div class="kv"><span class="k">Feature Coverage Guard</span><span class="v">${s.truth.feature_coverage_assertion ? "ON" : "OFF"}</span></div>` : `<div class="muted">Truth unavailable</div>`}
     </div>`;
+  // Fetch LIVE account quota (uncached) and display it truthfully.
+  fetch("/api/elevenlabs/quota").then(r => r.json()).then(q => {
+    const row = $("#quotaRow"); if (!row) return;
+    if (!q.ok) { row.querySelector(".v").textContent = q.error || "unavailable"; return; }
+    const rem = (q.remaining == null) ? "—" : q.remaining;
+    const reset = q.reset_date_utc ? ` · resets ${q.reset_date_utc}` : "";
+    row.querySelector(".v").innerHTML = `tier ${esc(q.tier||"—")} · ${q.character_count}/${q.character_limit} chars · <b style="color:${q.remaining>0?'var(--good)':'var(--bad)'}">${rem} remaining</b>${reset}`;
+  }).catch(() => { const row = $("#quotaRow"); if (row) row.querySelector(".v").textContent = "unavailable"; });
 }
 function el_model_id() { return state.status?.elevenlabs_model_id || "—"; }
 async function saveKey() {

@@ -55,6 +55,58 @@ def is_configured() -> bool:
     return bool(_key())
 
 
+def account_status() -> Dict[str, Any]:
+    """LIVE, uncached account/subscription status from GET /v1/user/subscription.
+
+    Returns only fields ElevenLabs actually returns — never fabricates
+    "remaining characters" or quota numbers. No caching: each call hits the
+    API so a topped-up / changed key is reflected immediately. Never falls
+    back to another key. Used by the Settings view (read-only).
+
+    Returns {ok, tier, status, character_count, character_limit, remaining,
+    reset_unix, reset_date_utc, error?}. `remaining` is computed strictly as
+    character_limit - character_count (the documented binding counter); if the
+    API does not return these fields, remaining is null (not fabricated).
+    """
+    if not is_configured():
+        return {"ok": False, "error": "ElevenLabs API key not configured."}
+    try:
+        r = requests.get("https://api.elevenlabs.io/v1/user/subscription",
+                         headers=_headers(), timeout=30)
+    except requests.RequestException as e:
+        return {"ok": False, "error": f"Network error: {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"ElevenLabs returned {r.status_code}",
+                "http_status": r.status_code}
+    try:
+        d = r.json()
+    except ValueError:
+        return {"ok": False, "error": "Unreadable subscription response."}
+    cc = d.get("character_count")
+    cl = d.get("character_limit")
+    remaining = (cl - cc) if (isinstance(cc, int) and isinstance(cl, int)) else None
+    reset_unix = d.get("next_character_count_reset_unix")
+    reset_date = None
+    if isinstance(reset_unix, int):
+        try:
+            import datetime as _dt
+            reset_date = _dt.datetime.utcfromtimestamp(reset_unix).strftime(
+                "%Y-%m-%d %H:%M UTC")
+        except Exception:
+            reset_date = None
+    return {
+        "ok": True,
+        "tier": d.get("tier"),
+        "status": d.get("status"),
+        "character_count": cc,
+        "character_limit": cl,
+        "remaining": remaining,
+        "reset_unix": reset_unix,
+        "reset_date_utc": reset_date,
+        "can_extend_character_limit": d.get("can_extend_character_limit"),
+    }
+
+
 class VoiceError(RuntimeError):
     """Raised when a Voice ID is invalid/unavailable. The controller must NOT
     fall back to another voice."""
