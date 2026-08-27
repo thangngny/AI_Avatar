@@ -11,10 +11,13 @@ import re
 import time
 import subprocess
 import shutil
+import secrets
+import hashlib
+import math
 from typing import Dict, Any
 
 from flask import (Flask, request, jsonify, send_file, send_from_directory,
-                   abort, Response)
+                   abort, Response, session, redirect, url_for)
 
 from . import config, db, gpu_service
 from . import envutil
@@ -24,10 +27,26 @@ from . import script_service
 from . import render_service
 from . import elevenlabs_client as el
 from . import edge_tts_client as edge
+from . import share_auth
 
 app = Flask(__name__, static_folder=None)
 app.config["JSON_AS_ASCII"] = False
 app.config["MAX_CONTENT_LENGTH"] = 512 * 1024 * 1024  # 512 MB upload cap
+# Per-process signing key for the session cookie, generated with `secrets`
+# and held IN MEMORY ONLY. Sessions are invalidated when the Studio process
+# restarts (spec §13). Never persisted to disk.
+app.secret_key = secrets.token_hex(32)
+# Cookie hardening (spec §13). HttpOnly is on by default for Flask sessions.
+# SameSite=Lax is correct for the same-site SPA. Secure is gated to real TLS
+# origins: Cloudflare Quick Tunnel forwards plain HTTP to the loopback origin,
+# so a Secure cookie would be dropped over that HTTP hop — we enable Secure
+# only when the origin itself is HTTPS (e.g. a future named tunnel with a TLS
+# origin or a reverse proxy that sets X-Forwarded-Proto).
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=bool(os.environ.get("STUDIO_SESSION_COOKIE_SECURE", "0") == "1"),
+)
 
 _WORKAROUND = None
 
@@ -66,6 +85,339 @@ def _safe_relpath(fname: str) -> str:
     if not fname or fname.startswith("/") or "\\" in fname or ".." in fname.split("/"):
         return ""
     return fname
+
+
+# --------------------------------------------------------------------------- #
+# Trusted-collaborator shared access gate                                     #
+# --------------------------------------------------------------------------- #
+# ONE application, ONE feature set. This gate only decides whether a request
+# may reach the existing controller. It never forks local vs remote behavior
+# (spec §2, §37). Disabled by default (plain local run_studio.py is unchanged).
+#
+# Auth model (spec §11/§13/§14/§35): a single in-memory access code + signed
+# session cookie. After login the collaborator gets FULL Studio access. The
+# owner's direct loopback access is exempt (no Cf-Connecting-IP header → the
+# request did not come through the tunnel), so the owner never logs in locally
+# even while sharing is enabled.
+
+_PUBLIC_API = ("/api/auth/status", "/api/auth/login", "/api/share/status")
+
+
+def _is_loopback(addr: str) -> bool:
+    return addr in ("127.0.0.1", "::1", "localhost")
+
+
+def _via_tunnel() -> bool:
+    """True if the request reached the origin through the Cloudflare tunnel.
+
+    cloudflared runs ON the owner's machine, so `request.remote_addr` is
+    loopback for BOTH the owner and the tunnel — remote_addr cannot tell them
+    apart. Cloudflare always sets `Cf-Connecting-IP` (and overwrites any
+    client-supplied value), so its presence is a reliable tunnel indicator.
+    Direct owner requests never have it."""
+    return bool(request.headers.get("Cf-Connecting-IP"))
+
+
+def _is_owner_direct() -> bool:
+    """True for the owner browsing localhost directly (loopback, not via the
+    tunnel). Used to gate owner-only admin endpoints and local-path disclosure."""
+    return _is_loopback(request.remote_addr or "") and not _via_tunnel()
+
+
+@app.before_request
+def _share_gate():
+    if not share_auth.is_enabled():
+        return None
+    # Owner direct loopback exemption: requests that did not traverse the
+    # tunnel bypass the gate. Safe because the origin listens on 127.0.0.1
+    # only — no external host can reach it without cloudflared.
+    if share_auth.loopback_exempt() and not _via_tunnel():
+        return None
+    p = request.path
+    # Public API + loopback admin endpoints (admin endpoints also check
+    # loopback themselves below).
+    if p in _PUBLIC_API or p.startswith("/api/auth/") or p.startswith("/api/share/"):
+        return None
+    if session.get("authed"):
+        return None
+    # Not authenticated.
+    if p.startswith("/api/"):
+        return jsonify({"ok": False, "error": "auth_required",
+                        "require_auth": True}), 401
+    # Browser navigation: serve the self-contained login page (for "/") or a
+    # redirect to it for any other non-API path (stale SPA deep links).
+    if p == "/login":
+        return _login_page()
+    if p == "/":
+        return _login_page()
+    return redirect("/login")
+
+
+def _login_page() -> Response:
+    html = """<!doctype html><html lang="vi" data-theme="dark"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>AI Avatar Studio — Đăng nhập</title>
+<style>
+:root{--bg:#0e1116;--panel:#161b22;--border:#2a313c;--accent:#4f8cff;--good:#3fb950;--bad:#f85149;--muted:#8b949e;--text:#e6edf3}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,'Segoe UI',Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;align-items:center;justify-content:center}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:32px 30px;width:380px;max-width:92vw}
+h1{font-size:18px;margin:0 0 4px;display:flex;align-items:center;gap:8px}
+.muted{color:var(--muted);font-size:13px;margin-bottom:22px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid var(--border);background:#0d1117;color:var(--text);font-size:16px;letter-spacing:2px;text-align:center;outline:none}
+input:focus{border-color:var(--accent)}
+button{width:100%;margin-top:16px;padding:12px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.6;cursor:wait}
+.err{color:var(--bad);font-size:13px;margin-top:12px;min-height:18px}
+.hint{color:var(--muted);font-size:11px;margin-top:18px;text-align:center;line-height:1.5}
+</style></head><body>
+<form class="card" id="f" autocomplete="off">
+  <h1>🎬 AI Avatar Studio</h1>
+  <div class="muted">Mã truy cập cộng sự</div>
+  <label for="code">MÃ TRUY CẬP</label>
+  <input id="code" name="code" placeholder="XXXX-XXXX-XXXX" autofocus required
+   pattern="[A-Za-z0-9-]{6,}" title="Nhập mã truy cập được chia sẻ"/>
+  <button type="submit" id="btn">ĐĂNG NHẬP</button>
+  <div class="err" id="err"></div>
+  <div class="hint">Truy cập đầy đủ Studio cho cộng sự đáng tin cậy.<br/>Avatar · ElevenLabs · Edge TTS · Render · History · Settings.</div>
+</form>
+<script>
+const f=document.getElementById('f'),code=document.getElementById('code'),btn=document.getElementById('btn'),err=document.getElementById('err');
+f.addEventListener('submit',async(e)=>{
+  e.preventDefault();btn.disabled=true;err.textContent='';
+  try{
+    const r=await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code:code.value.trim()})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d.ok){window.location='/';return;}
+    err.textContent=d.error||('Đăng nhập thất bại (HTTP '+r.status+').');
+  }catch(x){err.textContent='Lỗi mạng — thử lại.';}
+  finally{btn.disabled=false;}
+});
+</script>
+</body></html>"""
+    return Response(html, mimetype="text/html; charset=utf-8")
+
+
+@app.route("/login")
+def login_route():
+    # Public route (also reached via the gate for unauthed browser nav).
+    if not share_auth.is_enabled():
+        return redirect("/")
+    return _login_page()
+
+
+@app.route("/api/auth/status")
+def auth_status():
+    return jsonify({"require_auth": share_auth.is_enabled(),
+                    "loopback_exempt": share_auth.loopback_exempt(),
+                    "via_tunnel": _via_tunnel()})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    if not share_auth.is_enabled():
+        # Gate disabled → already full access; nothing to log into.
+        return jsonify({"ok": True, "require_auth": False})
+    data = request.get_json(silent=True) or {}
+    code = (data.get("code") or "").strip()
+    if not code:
+        return jsonify({"ok": False, "error": "Nhập mã truy cập."}), 400
+    if not share_auth.check_code(code):
+        # Constant, non-leaky failure. Do NOT reveal whether the gate is on.
+        time.sleep(0.4)
+        return jsonify({"ok": False, "error": "Mã truy cập không đúng."}), 401
+    session.clear()
+    session.permanent = False
+    session["authed"] = True
+    session["authed_at"] = time.time()
+    return jsonify({"ok": True, "require_auth": True})
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/share/status")
+def share_status():
+    """Public (no-auth) indicator the launcher/UI reads to know whether the
+    share gate is active. Never returns the code or any secret."""
+    return jsonify({"share_enabled": share_auth.is_enabled(),
+                    "loopback_exempt": share_auth.loopback_exempt()})
+
+
+@app.route("/api/share/enable", methods=["POST"])
+def share_enable():
+    """OWNER-DIRECT-ONLY admin endpoint. The Share launcher POSTs the freshly
+    generated access code here to arm the gate. The code is held in memory only
+    (spec §29). cloudflared is loopback, so remote_addr alone can't tell owner
+    from tunnel — we additionally reject any request that arrived through the
+    tunnel (Cf-Connecting-IP present)."""
+    if not _is_owner_direct():
+        return jsonify({"ok": False, "error": "owner-direct only"}), 403
+    data = request.get_json(silent=True) or {}
+    code = (data.get("access_code") or "").strip()
+    if not code:
+        return jsonify({"ok": False, "error": "access_code required"}), 400
+    loopback_exempt = data.get("loopback_exempt", True)
+    share_auth.enable(code, loopback_exempt=bool(loopback_exempt))
+    return jsonify({"ok": True, "share_enabled": True,
+                    "loopback_exempt": share_auth.loopback_exempt()})
+
+
+@app.route("/api/share/disable", methods=["POST"])
+def share_disable():
+    """OWNER-DIRECT-ONLY admin endpoint. Called when the owner stops sharing."""
+    if not _is_owner_direct():
+        return jsonify({"ok": False, "error": "owner-direct only"}), 403
+    share_auth.disable()
+    return jsonify({"ok": True, "share_enabled": False})
+
+
+# --------------------------------------------------------------------------- #
+# Chunked upload (Cloudflare >100 MB request-body safe)                       #
+# --------------------------------------------------------------------------- #
+# Cloudflare Free proxy caps a single request body near 100 MB. Raw avatar
+# sources can exceed that, so the Create-Avatar upload is chunked: init ->
+# repeated chunk POSTs (16 MiB each, well under the limit) -> complete, which
+# atomically assembles the file into RAW_SOURCES_ROOT and hands the local path
+# to the EXISTING analyze/prepare pipeline (no second importer — spec §16).
+UPLOAD_STAGING = os.path.join(config.TEMP_DIR, "uploads")
+CHUNK_HINT = 16 * 1024 * 1024              # 16 MiB recommended chunk size
+UPLOAD_MAX_TOTAL = 512 * 1024 * 1024       # 512 MB cap (matches MAX_CONTENT_LENGTH)
+UPLOAD_TTL_SEC = 2 * 60 * 60               # stale staging cleanup horizon
+
+
+def _upload_dir(upload_id: str) -> str:
+    return os.path.join(UPLOAD_STAGING, _sanitize_filename(upload_id))
+
+
+def _sweep_stale_uploads() -> None:
+    """Remove staging dirs older than UPLOAD_TTL_SEC. Best-effort."""
+    try:
+        if not os.path.isdir(UPLOAD_STAGING):
+            return
+        now = time.time()
+        for name in os.listdir(UPLOAD_STAGING):
+            d = os.path.join(UPLOAD_STAGING, name)
+            if not os.path.isdir(d):
+                continue
+            if now - os.path.getmtime(d) > UPLOAD_TTL_SEC:
+                shutil.rmtree(d, ignore_errors=True)
+    except Exception:
+        pass
+
+
+@app.route("/api/uploads/init", methods=["POST"])
+def uploads_init():
+    data = request.get_json(silent=True) or {}
+    filename = _sanitize_filename(data.get("filename") or "source.mp4")
+    size = int(data.get("size") or 0)
+    if size <= 0:
+        return jsonify({"ok": False, "error": "size required (bytes)"}), 400
+    if size > UPLOAD_MAX_TOTAL:
+        return jsonify({"ok": False, "error": "File too large (max 512 MB)."}), 400
+    _sweep_stale_uploads()
+    os.makedirs(UPLOAD_STAGING, exist_ok=True)
+    upload_id = secrets.token_hex(12)
+    d = _upload_dir(upload_id)
+    os.makedirs(d, exist_ok=True)
+    meta = {"filename": filename, "size": size, "created_at": time.time()}
+    with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(meta, f, ensure_ascii=False)
+    # Transport-aware chunk hint (spec §15/§16). The Cloudflare Free proxy caps
+    # a single request body near 100 MB, AND a Quick Tunnel origin read that
+    # exceeds ~100 s returns 524. At the tunnel's throttled ~1 Mbps, a 16 MiB
+    # chunk can take >100 s -> 524; a 2 MiB chunk is ~17 s (6x margin). Local
+    # loopback is effectively unlimited, so 16 MiB keeps local uploads fast.
+    # The client MUST honor this hint (the server only advises).
+    hint = 2 * 1024 * 1024 if _via_tunnel() else CHUNK_HINT
+    return jsonify({"ok": True, "upload_id": upload_id,
+                    "max_chunk_bytes": hint,
+                    "max_total_bytes": UPLOAD_MAX_TOTAL})
+
+
+@app.route("/api/uploads/<upload_id>/chunk", methods=["POST"])
+def uploads_chunk(upload_id):
+    uid = _sanitize_filename(upload_id)
+    d = _upload_dir(uid)
+    meta_path = os.path.join(d, "meta.json")
+    if not os.path.isfile(meta_path):
+        return jsonify({"ok": False, "error": "unknown upload_id"}), 404
+    try:
+        idx = int(request.form.get("chunk_index", "-1"))
+    except ValueError:
+        return jsonify({"ok": False, "error": "bad chunk_index"}), 400
+    if idx < 0:
+        return jsonify({"ok": False, "error": "bad chunk_index"}), 400
+    f = request.files.get("chunk_data")
+    if not f:
+        return jsonify({"ok": False, "error": "no chunk_data"}), 400
+    part = os.path.join(d, f"chunk_{idx:08d}.part")
+    f.save(part)
+    return jsonify({"ok": True, "received": idx, "bytes": os.path.getsize(part)})
+
+
+@app.route("/api/uploads/<upload_id>/complete", methods=["POST"])
+def uploads_complete(upload_id):
+    uid = _sanitize_filename(upload_id)
+    d = _upload_dir(uid)
+    meta_path = os.path.join(d, "meta.json")
+    if not os.path.isfile(meta_path):
+        return jsonify({"ok": False, "error": "unknown upload_id"}), 404
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    expected_size = int(meta.get("size", 0))
+    data = request.get_json(silent=True) or {}
+    expected_chunks = int(data.get("expected_chunks", 0))
+
+    parts = sorted(n for n in os.listdir(d) if n.startswith("chunk_") and n.endswith(".part"))
+    if expected_chunks and len(parts) != expected_chunks:
+        return jsonify({"ok": False, "error": f"missing chunks ({len(parts)}/{expected_chunks})"}), 400
+
+    # Atomic assemble: write to a temp file in the staging dir, then move into
+    # RAW_SOURCES_ROOT with a unique sanitized name.
+    os.makedirs(config.RAW_SOURCES_ROOT, exist_ok=True)
+    base, ext = os.path.splitext(meta.get("filename", "source.mp4"))
+    ext = ext or ".mp4"
+    final_name = f"{base}{ext}"
+    final_path = os.path.join(config.RAW_SOURCES_ROOT, final_name)
+    n = 2
+    while os.path.exists(final_path):
+        final_path = os.path.join(config.RAW_SOURCES_ROOT, f"{base}_{n}{ext}")
+        n += 1
+
+    tmp = os.path.join(d, "assembled.bin")
+    total = 0
+    sha = hashlib.sha1()
+    try:
+        with open(tmp, "wb") as out:
+            for part in parts:
+                with open(os.path.join(d, part), "rb") as pf:
+                    while True:
+                        buf = pf.read(65536)
+                        if not buf:
+                            break
+                        out.write(buf)
+                        sha.update(buf)
+                        total += len(buf)
+        if expected_size and total != expected_size:
+            return jsonify({"ok": False,
+                            "error": f"size mismatch ({total} != {expected_size})"}), 400
+        shutil.move(tmp, final_path)
+    except Exception as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        return jsonify({"ok": False, "error": f"assemble failed: {e}"}), 500
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
+    return jsonify({"ok": True, "path": os.path.abspath(final_path),
+                    "size": total, "sha1": sha.hexdigest(),
+                    "filename": os.path.basename(final_path)})
 
 
 # --------------------------------------------------------------------------- #
@@ -254,6 +606,11 @@ def avatar_sample():
                 manifest = json.load(f)
             if manifest.get("approved"):
                 temporary = bool(manifest.get("temporary", False))
+                # The local source path is owner-only (spec §10): never expose
+                # the on-disk raw-source path to a remote/tunnel caller.
+                source_path = manifest.get("source_path", "")
+                if _via_tunnel():
+                    source_path = ""
                 return jsonify({
                     "status": "TEMPORARY_BEST_EXISTING_SOURCE" if temporary
                               else "REAL_COMPLIANT_SOURCE",
@@ -261,7 +618,7 @@ def avatar_sample():
                     "temporary": temporary,
                     "url": "/assets/avatar_source_example/sample.mp4",
                     "why_eligible": manifest.get("why_eligible", ""),
-                    "source_path": manifest.get("source_path", ""),
+                    "source_path": source_path,
                     "checks": manifest.get("checks", []),
                     "caveats": manifest.get("caveats", []),
                 })
@@ -362,7 +719,7 @@ def voice_preview_file(name):
     p = os.path.join(config.TEMP_DIR, safe)
     if not os.path.isfile(p) or not safe.startswith("preview_"):
         abort(404)
-    return send_file(p, mimetype="audio/wav")
+    return send_file(p, mimetype="audio/wav", conditional=True)
 
 
 # --------------------------------------------------------------------------- #

@@ -72,6 +72,19 @@ avatars/wav2lip/face_detection/detection/sfd/*.pth
 
 # Raw input workspace (mc_hamai photo-avatar source + recording scripts); like data/, kept on disk only
 input_25_8/
+input/
+
+# Trusted-collaborator sharing runtime state (PIDs, tunnel URL) — never commit;
+# the access code / API key are NEVER written here (spec §29).
+diagnostics/share_runtime.json
+diagnostics/*.log
+diagnostics/*.err.log
+
+# One-off acceptance-test driver scripts (hardcoded ephemeral tunnel URL). The
+# chunked-upload + share-gate mechanism has permanent coverage in
+# tests/test_studio.py (TestChunkedUpload, TestShareGate).
+_drive_upload.py
+_cleanup_uploads.py
 
 # AI Avatar Studio runtime (DB, temp audio, prep logs) — under data/, already
 # ignored, but make it explicit so the local studio state is never committed.

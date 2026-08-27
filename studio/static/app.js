@@ -3,6 +3,9 @@ const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const api = async (path, opts = {}) => {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts });
+  // Trusted-collaborator gate: if the session lapsed/missing, reload to the
+  // login page (served by the backend for unauthed browser nav).
+  if (r.status === 401) { try { window.location.href = "/login"; } catch (e) {} }
   let data = {};
   try { data = await r.json(); } catch (e) { /* empty */ }
   if (!r.ok && !data.error) data.error = `HTTP ${r.status}`;
@@ -597,10 +600,51 @@ async function renderSampleSlot() {
   }
 }
 async function handleCreateFile(f) {
-  const fd = new FormData(); fd.append("video", f);
-  $("#cFileLabel").innerHTML = `Đang kiểm tra <b>${esc(f.name)}</b>…`;
-  const r = await fetch("/api/avatar/analyze", { method: "POST", body: fd });
-  const d = await r.json();
+  // Chunked upload (16 MiB) so raw sources >100 MB work through the Cloudflare
+  // tunnel (Free proxy ~100 MB/request cap). Same path for local + remote.
+  const label = $("#cFileLabel");
+  const setProg = (html) => { if (label) label.innerHTML = html; };
+  setProg(`Đang tải <b>${esc(f.name)}</b>…`);
+  const init = await api("/api/uploads/init", { method: "POST",
+    body: JSON.stringify({ filename: f.name, size: f.size }) });
+  if (!init.ok || !init.upload_id) {
+    setProg(`<span class="bad">${esc(f.name)} — lỗi tải: ${esc(init.error || "không khởi tạo được")}</span>`);
+    return;
+  }
+  // Honor the server's transport-aware chunk hint (2 MiB via tunnel to stay
+  // under Cloudflare's ~100s 524 timeout at throttled bandwidth; 16 MiB local).
+  const CHUNK = init.max_chunk_bytes || (16 * 1024 * 1024);
+  const total = Math.max(1, Math.ceil(f.size / CHUNK));
+  let ok = true;
+  for (let i = 0; i < total; i++) {
+    const slice = f.slice(i * CHUNK, Math.min((i + 1) * CHUNK, f.size));
+    const fd = new FormData(); fd.append("chunk_index", i); fd.append("chunk_data", slice);
+    const pct = Math.round(((i + 1) / total) * 100);
+    setProg(`ĐANG TẢI VIDEO <b>${pct}%</b><div class="uprogress"><div style="width:${pct}%"></div></div>
+      <div class="muted2">Chunk ${i + 1} / ${total}</div>`);
+    // Per-chunk retry (spec §18): a failed chunk is retried, not the whole upload.
+    let sent = false;
+    for (let attempt = 0; attempt < 3 && !sent; attempt++) {
+      try {
+        const r = await fetch(`/api/uploads/${init.upload_id}/chunk`, { method: "POST", body: fd });
+        if (r.ok) { sent = true; break; }
+        if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
+      } catch (e) { if (attempt < 2) await new Promise(r => setTimeout(r, 1500)); }
+    }
+    if (!sent) { ok = false; setProg(`<span class="bad">Lỗi chunk ${i + 1}/${total} — dừng.</span>`); break; }
+  }
+  if (!ok) return;
+  const done = await api(`/api/uploads/${init.upload_id}/complete`, { method: "POST",
+    body: JSON.stringify({ filename: f.name, expected_size: f.size, expected_chunks: total }) });
+  if (!done.ok || !done.path) {
+    setProg(`<span class="bad">${esc(f.name)} — lỗi ghép file: ${esc(done.error || "không hoàn tất")}</span>`);
+    return;
+  }
+  // Hand the assembled local path to the EXISTING analyze pipeline.
+  setProg(`ĐANG KIỂM TRA VIDEO <b>${esc(f.name)}</b>…`);
+  const r = await fetch("/api/avatar/analyze", { method: "POST",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: done.path }) });
+  const d = await r.json().catch(() => ({}));
   $("#cFileLabel").innerHTML = `${esc(f.name)} · ${d.integrity ? d.integrity.width + "×" + d.integrity.height + " · " + d.integrity.duration + " giây" : ""}`;
   if (d.technical_failure) {
     createState = { videoPath: null, quality: null, override: false, prepAvatarId: null };

@@ -689,12 +689,19 @@ class TestSampleEndpoint(StudioTestCase):
         r = self.client.get("/api/avatar/sample")
         self.assertEqual(r.status_code, 200)
         d = r.get_json()
+        # V1.1.6 added TEMPORARY_BEST_EXISTING_SOURCE (operator-selected best
+        # raw source as a temporary example, marked temporary=true).
         self.assertIn(d["status"], ("SAMPLE_ASSET_PENDING_HUMAN_APPROVAL",
-                                     "REAL_COMPLIANT_SOURCE"))
+                                     "REAL_COMPLIANT_SOURCE",
+                                     "TEMPORARY_BEST_EXISTING_SOURCE"))
         # Must never fabricate availability without an approved manifest.
         if not d.get("available"):
             self.assertEqual(d["status"], "SAMPLE_ASSET_PENDING_HUMAN_APPROVAL")
             self.assertIn("cập nhật", d["message"].lower())
+        # A temporary sample is honest about being temporary.
+        if d.get("temporary"):
+            self.assertEqual(d["status"], "TEMPORARY_BEST_EXISTING_SOURCE")
+            self.assertTrue(d.get("available"))
 
 
 class TestEdgeAPIRoutes(StudioTestCase):
@@ -758,6 +765,123 @@ class TestLockedTruthUnchangedV115(StudioTestCase):
         with open(os.path.join(ROOT, "config", "render_truth.json"), "r",
                   encoding="utf-8") as f:
             self.assertEqual(json.load(f), t)
+
+
+class TestChunkedUpload(StudioTestCase):
+    """Spec §15/§16: chunked upload assembles atomically with size + sha1 match,
+    no second importer. Covers the >100MB-Cloudflare-limit path with small
+    multi-chunk synthetic data (the mechanism is size-agnostic)."""
+
+    def test_chunked_upload_assembles_with_size_and_sha1(self):
+        import hashlib
+        from studio.app import app
+        app.config["TESTING"] = True
+        c = app.test_client()
+        data = os.urandom(2_500_000)  # 2.5 MB
+        local_sha = hashlib.sha1(data).hexdigest()
+        init = c.post("/api/uploads/init",
+                      json={"filename": "chunktest.mp4", "size": len(data)}).get_json()
+        self.assertTrue(init["ok"])
+        uid = init["upload_id"]
+        CH = 1_000_000  # 3 chunks
+        total = -(-len(data) // CH)
+        for i in range(total):
+            part = data[i * CH:(i + 1) * CH]
+            body = (f"--B\r\nContent-Disposition: form-data; name=\"chunk_index\"\r\n\r\n{i}\r\n"
+                    f"--B\r\nContent-Disposition: form-data; name=\"chunk_data\"; filename=\"c\"\r\n"
+                    f"Content-Type: application/octet-stream\r\n\r\n").encode() + part + b"\r\n--B--\r\n"
+            rr = c.post(f"/api/uploads/{uid}/chunk", data=body,
+                        content_type="multipart/form-data; boundary=B")
+            self.assertTrue(rr.get_json().get("ok"), f"chunk {i} failed")
+        done = c.post(f"/api/uploads/{uid}/complete",
+                      json={"filename": "chunktest.mp4", "expected_size": len(data),
+                            "expected_chunks": total}).get_json()
+        self.assertTrue(done.get("ok"))
+        self.assertEqual(done["size"], len(data))
+        self.assertEqual(done["sha1"], local_sha)
+        p = done["path"]
+        self.assertTrue(os.path.isfile(p))
+        self.assertEqual(os.path.getsize(p), len(data))
+        os.remove(p)
+
+    def test_init_rejects_oversize(self):
+        from studio.app import app
+        c = app.test_client()
+        r = c.post("/api/uploads/init",
+                   json={"filename": "big.mp4", "size": 600 * 1024 * 1024}).get_json()
+        self.assertFalse(r["ok"])
+        self.assertIn("512", r["error"])
+
+
+class TestShareGate(StudioTestCase):
+    """Spec §11/§13/§14/§35: in-memory access gate, owner-loopback exempt,
+    tunnel requires auth, admin endpoints owner-direct only, sample path
+    hidden from tunnel."""
+
+    def setUp(self):
+        super().setUp()
+        from studio.app import app
+        from studio import share_auth
+        share_auth.disable()
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+
+    def tearDown(self):
+        from studio import share_auth
+        share_auth.disable()
+        super().tearDown()
+
+    def test_gate_off_local_unchanged(self):
+        # Gate disabled -> SPA served, no login.
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+
+    def test_tunnel_requires_auth_and_login(self):
+        from studio import share_auth
+        share_auth.enable("TEST-CODE-1234")
+        h = {"Cf-Connecting-IP": "203.0.113.7"}
+        self.assertEqual(self.client.get("/api/system/status", headers=h).status_code, 401)
+        self.assertEqual(self.client.post("/api/auth/login", json={"code": "NOPE"}, headers=h).status_code, 401)
+        self.assertTrue(self.client.post("/api/auth/login", json={"code": "TEST-CODE-1234"}, headers=h).get_json()["ok"])
+        self.assertEqual(self.client.get("/api/system/status", headers=h).status_code, 200)
+
+    def test_owner_loopback_exempt_when_gate_on(self):
+        from studio import share_auth
+        share_auth.enable("TEST-CODE-1234")
+        # No Cf-Connecting-IP -> owner direct -> no login needed.
+        self.assertEqual(self.client.get("/").status_code, 200)
+        self.assertEqual(self.client.get("/api/system/status").status_code, 200)
+
+    def test_admin_endpoints_reject_tunnel(self):
+        from studio import share_auth
+        share_auth.enable("TEST-CODE-1234")
+        h = {"Cf-Connecting-IP": "203.0.113.7"}
+        # tunnel caller cannot arm/disable the gate
+        self.assertEqual(self.client.post("/api/share/enable", json={"access_code": "x"}, headers=h).status_code, 403)
+        self.assertEqual(self.client.post("/api/share/disable", headers=h).status_code, 403)
+        # owner-direct can
+        er = self.client.post("/api/share/enable", json={"access_code": "OWNER"}).get_json()
+        self.assertTrue(er["share_enabled"])
+
+    def test_sample_source_path_hidden_from_tunnel(self):
+        from studio import share_auth
+        share_auth.enable("CODE")
+        h = {"Cf-Connecting-IP": "203.0.113.7"}
+        # login first (gate on)
+        self.client.post("/api/auth/login", json={"code": "CODE"}, headers=h)
+        tunnel = self.client.get("/api/avatar/sample", headers=h).get_json()
+        self.assertEqual(tunnel.get("source_path"), "")  # hidden from remote (§10)
+        owner = self.client.get("/api/avatar/sample").get_json()
+        self.assertTrue(owner.get("source_path"))  # visible to owner
+
+    def test_adaptive_chunk_hint(self):
+        from studio.app import app
+        c = app.test_client()
+        local = c.post("/api/uploads/init", json={"filename": "x.mp4", "size": 1000}).get_json()
+        self.assertEqual(local["max_chunk_bytes"], 16 * 1024 * 1024)
+        tunnel = c.post("/api/uploads/init", json={"filename": "x.mp4", "size": 1000},
+                        headers={"Cf-Connecting-IP": "203.0.113.9"}).get_json()
+        self.assertEqual(tunnel["max_chunk_bytes"], 2 * 1024 * 1024)
 
 
 if __name__ == "__main__":
