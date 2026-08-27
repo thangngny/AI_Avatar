@@ -151,16 +151,34 @@ def analyze(path, n=8):
     elif chin >= 0.3: cs = "WARN"; cn = "limited chin room"
     else: cs = "FAIL"; cn = "chin cropped"
     cats["CHIN_VISIBILITY"] = {"status": cs, "value": round(chin, 3), "note": cn}
-    # SOURCE_MOUTH_STATE: talking_proxy low => neutral
-    if talking_proxy < 0.02: ms, mn = "PASS", "NEUTRAL_CLOSED/low motion (ideal)"
-    elif talking_proxy < 0.05: ms, mn = "PASS", "NEUTRAL_SLIGHTLY_OPEN"
-    elif talking_proxy < 0.09: ms, mn = "WARN", "TALKING (penalize — non-ideal base)"
-    else: ms, mn = "FAIL", "STRONG_TALKING/HIGH_EXPRESSION (poor master)"
-    cats["SOURCE_MOUTH_STATE"] = {"status": ms, "value": round(talking_proxy, 4), "note": mn}
-    cats["MOTION"] = {"status": band(medmot, 3.0, 6.0, lower_better=True), "value": round(medmot, 2),
-                      "note": "median frame-to-frame diff (low=stable)" if medmot <= 6 else "high motion/shake risk"}
-    cats["LIGHTING"] = {"status": band(flick, 2.0, 4.0, lower_better=True), "value": round(flick, 2),
-                        "note": "luma std across samples (low=stable)"}
+    # SOURCE_MOUTH_STATE: talking detection via temporal mouth-region variation.
+    # Static/very-short sources (fc ≤ 2) have no real temporal data → UNKNOWN.
+    # cv2.VideoCapture reads a 1-frame image 8× (same frame) but face-detection
+    # noise produces a non-zero talking_proxy → false positive. Guard with fc.
+    if fc <= 2:
+        cats["SOURCE_MOUTH_STATE"] = {"status": "UNKNOWN", "value": 0.0,
+                                       "note": "insufficient frames for mouth-state analysis (static/short)"}
+        cats["MOTION"] = {"status": "UNKNOWN", "value": 0.0,
+                          "note": "insufficient frames for motion analysis"}
+        cats["LIGHTING"] = {"status": "UNKNOWN", "value": 0.0,
+                            "note": "insufficient frames for lighting analysis"}
+    else:
+        # Lowered PASS threshold from 0.02 → 0.003 to catch subtle talking.
+        # Test set: test17_8/Close Up.mp4 talking_proxy=0.0052 (KNOWN TALKING)
+        # was falsely PASS at 0.02; now correctly WARN at 0.003.
+        if talking_proxy < 0.003:
+            ms, mn = "PASS", "STILL/neutral (ideal — no talking detected)"
+        elif talking_proxy < 0.02:
+            ms, mn = "WARN", "POSSIBLE_TALKING — mouth articulation detected"
+        elif talking_proxy < 0.09:
+            ms, mn = "WARN", "TALKING — subject speaking in source"
+        else:
+            ms, mn = "FAIL", "STRONG_TALKING/HIGH_EXPRESSION (poor master)"
+        cats["SOURCE_MOUTH_STATE"] = {"status": ms, "value": round(talking_proxy, 4), "note": mn}
+        cats["MOTION"] = {"status": band(medmot, 3.0, 6.0, lower_better=True), "value": round(medmot, 2),
+                          "note": "median frame-to-frame diff (low=stable)" if medmot <= 6 else "high motion/shake risk"}
+        cats["LIGHTING"] = {"status": band(flick, 2.0, 4.0, lower_better=True), "value": round(flick, 2),
+                            "note": "luma std across samples (low=stable)"}
 
     res["categories"] = cats
     # overall: FAIL if any FAIL; else WARN if any WARN; else PASS

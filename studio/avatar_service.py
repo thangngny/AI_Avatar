@@ -213,34 +213,42 @@ _HUMAN = {
     "FACE_SIZE": {
         "WARN": "Khuôn mặt hơi nhỏ trong khung hình. Nên quay gần hơn để vùng môi có nhiều chi tiết hơn.",
         "FAIL": "Khuôn mặt khá nhỏ / xa camera. Chất lượng khẩu hình sẽ thấp; nên dùng nguồn quay gần hơn nếu có thể.",
+        "UNKNOWN": "Không xác định được kích thước khuôn mặt.",
     },
     "FACE_SHARPNESS": {
         "WARN": "Khuôn mặt hơi mờ. Nguồn sắc nét hơn giúp chi tiết môi tốt hơn.",
         "FAIL": "Khuôn mặt rất mờ. Khẩu hình sẽ kém.",
+        "UNKNOWN": "Không xác định được độ nét.",
     },
     "FRONTALNESS": {
         "WARN": "Mặt hơi lệch. Nhìn thẳng vào camera cho kết quả tốt nhất.",
         "FAIL": "Mặt lệch nhiều, không đủ chính diện cho lipsync ổn định.",
+        "UNKNOWN": "Không xác định được góc mặt.",
     },
     "MOUTH_VISIBILITY": {
         "WARN": "Miệng hơi ra khỏi khung. Giữ toàn bộ miệng nhìn thấy.",
         "FAIL": "Miệng không nhìn thấy rõ trong khung.",
+        "UNKNOWN": "Không xác định được hiển thị miệng.",
     },
     "CHIN_VISIBILITY": {
         "WARN": "Cằm/hàm hơi sát mép. Bao gồm cả cằm và đường hàm trong khung.",
         "FAIL": "Cằm/hàm bị cắt. Mask cần đường hàm đầy đủ.",
+        "UNKNOWN": "Không xác định được hiển thị cằm.",
     },
     "SOURCE_MOUTH_STATE": {
-        "WARN": "Nhân vật đang nói trong video nguồn. Nên dùng nguồn miệng nghỉ, trung tính.",
+        "WARN": "Có dấu hiệu nhân vật đang nói trong video nguồn. Nên dùng nguồn miệng nghỉ, trung tính.",
         "FAIL": "Nguồn có nói nhiều / biểu cảm mạnh. Nên dùng nguồn miệng nghỉ, trung tính.",
+        "UNKNOWN": "Không đủ dữ liệu để xác định trạng thái miệng (ảnh tĩnh hoặc video quá ngắn).",
     },
     "MOTION": {
         "WARN": "Có chuyển động camera/nhân vật. Nguồn cố định tốt hơn.",
         "FAIL": "Chuyển động/rung nhiều. Nên dùng nguồn cố định, ổn định.",
+        "UNKNOWN": "Không đủ dữ liệu để phân tích chuyển động (ảnh tĩnh hoặc video quá ngắn).",
     },
     "LIGHTING": {
         "WARN": "Ánh sáng thay đổi trong video. Ánh sáng ổn định, đều tốt hơn.",
         "FAIL": "Ánh sáng không ổn định. Nên dùng ánh sáng đều, ổn định.",
+        "UNKNOWN": "Không đủ dữ liệu để phân tích ánh sáng (ảnh tĩnh hoặc video quá ngắn).",
     },
 }
 
