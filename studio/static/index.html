@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AI Avatar Studio</title>
+<link rel="stylesheet" href="/styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <span class="title">AI AVATAR STUDIO</span>
+    </div>
+    <div class="status-pill" id="globalStatus">
+      <span class="dot" id="statusDot"></span>
+      <span id="statusText">CHECKING…</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar">
+      <button class="nav-item active" data-view="quick">▶ Quick Render</button>
+      <button class="nav-item" data-view="create">＋ Create Avatar</button>
+      <button class="nav-item" data-view="library">📁 Avatar Library</button>
+      <button class="nav-item" data-view="history">🕘 Render History</button>
+      <button class="nav-item" data-view="settings">⚙ Settings</button>
+      <div class="sysstat-mini" id="sysstatMini"></div>
+    </nav>
+
+    <main class="content" id="content"><!-- views injected here --></main>
+  </div>
+
+  <footer class="queue-bar" id="queueBar">
+    <div class="queue-label">RENDER QUEUE</div>
+    <div class="queue-items" id="queueItems"><span class="muted">Idle</span></div>
+  </footer>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

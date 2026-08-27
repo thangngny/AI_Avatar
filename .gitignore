@@ -67,3 +67,7 @@ avatars/wav2lip/face_detection/detection/sfd/*.pth
 
 # Raw input workspace (mc_hamai photo-avatar source + recording scripts); like data/, kept on disk only
 input_25_8/
+
+# AI Avatar Studio runtime (DB, temp audio, prep logs) — under data/, already
+# ignored, but make it explicit so the local studio state is never committed.
+data/studio_runtime/

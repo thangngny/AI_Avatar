@@ -19,8 +19,18 @@
 | Production truth version   | v1                                           |
 | Realtime product           | Separate / untouched                         |
 | LatentSync                 | Experimental only / not production           |
-| Last update                | 2026-08-25                                   |
+| Operator UI                | studio/ + run_studio.py (AI_Avatar_Studio.bat) — controller only, NO lip-sync truth |
+| Last update                | 2026-08-27                                   |
 | Last verified commit        | 5e295db (main HEAD)                          |
+
+> **Operator UI (studio/).** `studio/` is a local operator UI/controller for
+> the existing production system. It drives `generate_video_from_script.py`,
+> `tools/avatar_source_quality/validator.py`, `avatars/musetalk/genavatar.py`,
+> and the ElevenLabs TTS API as **subprocesses**. It has NO independent
+> lip-sync truth, exposes NO editable gain/ctx/offset/fps/resolution controls,
+> and reads `config/render_truth.json` read-only. The CLI production renderer
+> remains the source of truth and still works independently. LatentSync
+> remains unreachable from the UI.
 
 ## 1B. REPOSITORY LAYOUT (authoritative)
 
