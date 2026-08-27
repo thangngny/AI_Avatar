@@ -228,15 +228,23 @@ def list_source():
 
 @app.route("/api/avatar/sample")
 def avatar_sample():
-    """Report whether a COMPLIANT raw-source sample video is available for the
-    guided Create Avatar flow (spec A7/A8/H).
+    """Report whether a sample video is available for the guided Create Avatar
+    flow (spec A7/A8/H).
 
-    A sample is eligible only if a human-approved compliant MP4 exists under
-    studio/static/assets/avatar_source_example/. Known talking sources (e.g.
-    test17_8/Close Up.mp4) are explicitly NOT used as the ideal-source example.
-    If no approved sample exists, returns status='SAMPLE_ASSET_PENDING_HUMAN_APPROVAL'
-    with the schematic framing guide fallback — never fabricates a real-person
-    sample. The UI shows 'Video mẫu chuẩn đang được cập nhật.' in that case."""
+    Two eligible kinds (both require sample.mp4 + manifest.json with
+    approved=true under studio/static/assets/avatar_source_example/):
+
+      * TEMPORARY_BEST_EXISTING_SOURCE — the operator explicitly chose the best
+        raw source currently on disk as a TEMPORARY example, NOT a perfect
+        standard source. The UI must label this honestly as 'mẫu tạm thời'.
+      * REAL_COMPLIANT_SOURCE — a human-approved compliant MP4 (manifest has no
+        "temporary": true). The UI shows 'Video mẫu đúng chuẩn'.
+
+    Known talking sources (e.g. test17_8/Close Up.mp4) are explicitly NOT used
+    as the ideal-source example. If no approved sample exists, returns
+    status='SAMPLE_ASSET_PENDING_HUMAN_APPROVAL' with the schematic framing
+    guide fallback — never fabricates a real-person sample. The UI shows
+    'Video mẫu chuẩn đang được cập nhật.' in that case."""
     sample_dir = os.path.join(STATIC_DIR, "assets", "avatar_source_example")
     sample_path = os.path.join(sample_dir, "sample.mp4")
     manifest_path = os.path.join(sample_dir, "manifest.json")
@@ -245,13 +253,17 @@ def avatar_sample():
             with open(manifest_path, "r", encoding="utf-8") as f:
                 manifest = json.load(f)
             if manifest.get("approved"):
+                temporary = bool(manifest.get("temporary", False))
                 return jsonify({
-                    "status": "REAL_COMPLIANT_SOURCE",
+                    "status": "TEMPORARY_BEST_EXISTING_SOURCE" if temporary
+                              else "REAL_COMPLIANT_SOURCE",
                     "available": True,
+                    "temporary": temporary,
                     "url": "/assets/avatar_source_example/sample.mp4",
                     "why_eligible": manifest.get("why_eligible", ""),
                     "source_path": manifest.get("source_path", ""),
                     "checks": manifest.get("checks", []),
+                    "caveats": manifest.get("caveats", []),
                 })
         except Exception:
             pass

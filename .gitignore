@@ -57,6 +57,11 @@ pretrained
 *.npz
 *.mp4
 .DS_Store
+
+# Studio operator sample asset (V1.1.6): the small re-encoded example MP4 used
+# in the guided "Tạo AI Avatar mới" flow. Deliberately tracked as a UI asset —
+# it is tiny (~3.5 MB), browser-safe H.264, and documented by manifest.json.
+!studio/static/assets/avatar_source_example/sample.mp4
 workspace/log_ngp.txt
 .idea
 models/

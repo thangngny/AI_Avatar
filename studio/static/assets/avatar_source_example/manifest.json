@@ -1,0 +1,40 @@
+{
+  "approved": true,
+  "temporary": true,
+  "status": "TEMPORARY_BEST_EXISTING_SOURCE",
+  "version": "ai-avatar-studio-ui-v1.1.6",
+  "selected_at": "2026-08-27",
+  "source_path": "C:\\CongThang_AI_Avatar\\AI_avatar\\data\\input\\avatar_sources\\half.mp4",
+  "source_asset": "studio/static/assets/avatar_source_example/sample.mp4",
+  "why_eligible": "Mẫu TẠM THỜI: nguồn raw tốt nhất hiện có trên disk được chọn làm video ví dụ cho luồng 'Tạo AI Avatar mới', theo chỉ thị của operator (không chờ quay nguồn chuẩn mới). Đây KHÔNG phải nguồn chuẩn hoàn hảo — chỉ là lựa chọn tốt nhất hiện tại. Sẽ được thay bằng nguồn chuẩn đã ghi hình khi sẵn sàng.",
+  "selection_basis": {
+    "method": "tools/avatar_source_quality/validator.py chạy trên 4 nguồn raw hiện có (2026-08-27). Chọn nguồn có điểm cao nhất theo face size / sharpness / motion / frontalness / mouth & chin visibility.",
+    "candidates": [
+      {"file": "half.mp4", "overall": "WARN", "face_h_ratio": 0.2194, "face_size": "LARGE (close-up)", "sharpness": 204.7, "motion": 0.87, "lighting": 2.29, "chosen": true, "why": "mặt lớn nhất (close-up), nét, frontal, miệng + cằm đầy đủ, motion thấp nhất"},
+      {"file": "Close Up.mp4", "overall": "WARN", "face_h_ratio": 0.1034, "sharpness": 235.0, "motion": 5.42, "lighting": 2.58, "chosen": false, "why": "motion cao (WARN); spec đánh dấu là nguồn đang nói — không dùng làm mẫu chuẩn"},
+      {"file": "Full Body.mp4", "overall": "WARN", "face_h_ratio": 0.0734, "face_size": "small (WARN)", "sharpness": 278.8, "motion": 2.16, "chosen": false, "why": "mặt quá nhỏ cho lip-sync (full body xa)"},
+      {"file": "Hearing-1.mp4", "overall": "FAIL", "face_h_ratio": 0.087, "sharpness": 16.5, "why": "rất mờ (FACE_SHARPNESS FAIL) — loại"}
+    ]
+  },
+  "checks": [
+    "Mặt lớn (close-up, face_h_ratio=0.22) — chi tiết môi đầy đủ",
+    "Sắc nét (Laplacian 205)",
+    "Chính diện (frontal_ratio=1.0)",
+    "Miệng nhìn thấy đầy đủ (mouth_in=1.0)",
+    "Cằm/hàm đầy đủ trong khung",
+    "Camera cố định, motion thấp (0.87)"
+  ],
+  "caveats": [
+    "MẪU TẠM THỜI — không phải nguồn 'chuẩn đúng chuẩn'; chờ nguồn mới quay xong để thay",
+    "LIGHTING WARN nhẹ (2.29) — ánh sáng hơi đổi giữa các khung",
+    "SOURCE_MOUTH_STATE = UNKNOWN (detector tự động không phân biệt được nói vs nghỉ trong dải này — cần kiểm tra trực quan)"
+  ],
+  "encoding": {
+    "codec": "h264 (Constrained Baseline, yuv420p, +faststart)",
+    "resolution": "1280x720",
+    "fps": 30,
+    "duration_sec": 20.0,
+    "audio": "none (muted loop example)",
+    "note": "Re-encoded từ half.mp4 gốc sang H.264 baseline yuv420p + faststart để phát được trên mọi trình duyệt (tránh lỗi model/codec không hỗ trợ)."
+  }
+}

@@ -553,11 +553,27 @@ async function renderSampleSlot() {
     const checks = (r.checks && r.checks.length ? r.checks : [
       "Mặt đủ lớn", "Gần chính diện", "Không nói", "Cằm đầy đủ", "Camera cố định", "Chuyển động nhẹ"
     ]).map(c => `<div class="sample-check">✓ ${esc(c)}</div>`).join("");
-    box.innerHTML = `<div class="card sample-card">
-      <h2>Video mẫu đúng chuẩn</h2>
-      <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
-      <div class="sample-checks">${checks}</div>
-    </div>`;
+    const caveats = (r.caveats && r.caveats.length)
+      ? `<div class="sample-caveats">${r.caveats.map(c => `<div class="sample-caveat">⚠ ${esc(c)}</div>`).join("")}</div>`
+      : "";
+    if (r.temporary) {
+      // Honest TEMPORARY label — best existing raw source, NOT a perfect
+      // standard source. Operator explicitly accepted this (V1.1.6).
+      box.innerHTML = `<div class="card sample-card sample-temporary">
+        <h2>Video mẫu tạm thời</h2>
+        <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
+        <div class="sample-temporary-note">${esc(r.why_eligible || "Mẫu tạm thời — nguồn raw tốt nhất hiện có trên disk.")}</div>
+        <div class="sample-checks">${checks}</div>
+        ${caveats}
+      </div>`;
+    } else {
+      box.innerHTML = `<div class="card sample-card">
+        <h2>Video mẫu đúng chuẩn</h2>
+        <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
+        <div class="sample-checks">${checks}</div>
+        ${caveats}
+      </div>`;
+    }
   } else {
     // Honest pending state — no fabricated real-person sample (spec A7/H).
     box.innerHTML = `<div class="card sample-card sample-pending">
