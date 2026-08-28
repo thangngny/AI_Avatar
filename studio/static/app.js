@@ -105,6 +105,10 @@ const state = {
   ttsProvider: "elevenlabs", edgeVoices: [], edgeVoice: "vi-VN-HoaiMyNeural",
   // Wizard state (V1.3.1): current + furthest-reached step for each flow.
   quickStep: 1, quickMax: 1, createStep: 1, createMax: 1, activeJobs: [],
+  // V1.5.0 — ElevenLabs per-voice config auto-sync. voiceConfig is the resolved
+  // config for the CURRENTLY entered voice (or null = legacy/Studio-default path).
+  // Changing the Voice ID clears it (no leak between voices).
+  voiceConfig: null, voiceSyncMode: "auto_current", voiceHistory: null,
 };
 
 // Standardized Vietnamese mouth-motion diagnostic script (spec B10). A
@@ -395,9 +399,19 @@ function quickRefresh() {
     const av = state.selectedAvatar ? state.selectedAvatar.avatar_id : "—";
     const words = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0;
     const voice = state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId || "—");
+    let cfgSrc = "";
+    if (state.ttsProvider !== "edge") {
+      const c = state.voiceConfig;
+      if (!c) cfgSrc = "Cấu hình Studio";
+      else if (c.match_strength === "history_item") cfgSrc = "Khớp bản ElevenLabs";
+      else if (c.match_strength === "history_matched") cfgSrc = "Đã đồng bộ ElevenLabs";
+      else if (c.match_strength === "settings_only") cfgSrc = "Cài đặt giọng (Model Studio)";
+      else if (c.match_strength === "manual") cfgSrc = "Tùy chỉnh";
+    }
     rev.innerHTML = `<div class="rv"><span class="rv-k">Avatar</span><span class="rv-v">${esc(av)}</span></div>
       <div class="rv"><span class="rv-k">Nội dung</span><span class="rv-v">${words} từ</span></div>
-      <div class="rv"><span class="rv-k">Giọng</span><span class="rv-v">${esc(voice)}</span></div>`;
+      <div class="rv"><span class="rv-k">Giọng</span><span class="rv-v">${esc(voice)}</span></div>
+      ${cfgSrc ? `<div class="rv"><span class="rv-k">Nguồn cấu hình</span><span class="rv-v">${esc(cfgSrc)}</span></div>` : ""}`;
   }
 }
 function quickGoto(n) {
@@ -429,7 +443,7 @@ function renderTTSPanel() {
     const esel = $("#qEdgeVoice");
     if (esel) esel.onchange = (e) => { state.edgeVoice = e.target.value; ls.set("studio_edge_voice", e.target.value); };
   } else {
-    if (note) note.innerHTML = `<span class="tag good">ELEVENLABS</span> <span class="muted">Giọng production chất lượng cao. Cần Voice ID.</span>`;
+    if (note) note.innerHTML = `<span class="tag good">ELEVENLABS</span> <span class="muted">Giọng production chất lượng cao. Cần Voice ID. Studio tự đồng bộ cấu hình từ ElevenLabs.</span>`;
     panel.innerHTML = `
       <label>Dán Voice ID từ ElevenLabs (ghi nhớ trên máy này)</label>
       <div class="row">
@@ -437,19 +451,192 @@ function renderTTSPanel() {
         <button id="qCheckVoice" onclick="checkVoice()">Kiểm tra giọng</button>
         <button class="ghost" onclick="previewVoice()">▶ Nghe thử</button>
       </div>
-      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>`;
+      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>
+      <div id="qVoiceSync" style="margin-top:8px;font-size:12px"></div>
+      <details class="tech" style="margin-top:10px">
+        <summary>Cấu hình giọng — đồng bộ ElevenLabs</summary>
+        <div style="margin-top:10px">
+          <div class="tts-tabs" id="syncTabs" style="margin-bottom:10px">
+            <button class="sync-tab active" data-m="auto_current">Cấu hình hiện tại</button>
+            <button class="sync-tab" data-m="history_match">Khớp bản đã tạo</button>
+            <button class="sync-tab" data-m="manual">Tùy chỉnh</button>
+          </div>
+          <div id="syncPanel"></div>
+          <div class="hint" style="margin-top:8px">Kết quả có thể có khác biệt nhỏ giữa các lần tạo vì TTS là mô hình sinh nội dung.</div>
+        </div>
+      </details>`;
     const v = $("#qVoice"); if (v) {
       v.value = state.voiceId;
       // Re-evaluate wizard gating on every keystroke so #qNext3 (Tiếp tục)
-      // enables as soon as a Voice ID is present — mirroring #qScript.oninput /
-      // #qAvatar.onchange. Without this, the Voice step's "Tiếp tục" stays
-      // disabled after typing a Voice ID and requires a step-header re-click.
-      // Gating stays truthful: quickVoiceReady() still requires a non-empty
-      // state.voiceId for ElevenLabs; empty/invalid stays disabled.
-      v.oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; ls.set("studio_voiceId", e.target.value); quickRefresh(); };
+      // enables as soon as a Voice ID is present (V1.4.2 fix). V1.5.0: changing
+      // the Voice ID clears the previous voice's resolved config (no leak).
+      v.oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; state.voiceConfig = null; state.voiceHistory = null; state.voiceSyncMode = "auto_current"; ls.set("studio_voiceId", e.target.value); quickRefresh(); renderVoiceSync(); renderSyncPanel(); };
     }
+    $$("#syncTabs .sync-tab").forEach(t => t.onclick = () => {
+      state.voiceSyncMode = t.dataset.m;
+      $$("#syncTabs .sync-tab").forEach(x => x.classList.toggle("active", x === t));
+      renderSyncPanel();
+    });
+    renderVoiceSync();
+    renderSyncPanel();
   }
 }
+// --------------------------------------------------------------------------- //
+// V1.5.0 — ElevenLabs per-voice config auto-sync (Mode A/B/C)                //
+// --------------------------------------------------------------------------- //
+const SYNC_SRC_VI = {
+  "ELEVENLABS_VOICE_SETTINGS_API": "ElevenLabs (cài đặt giọng)",
+  "MATCHING_HISTORY_GENERATION": "ElevenLabs (bản tạo khớp)",
+  "ELEVENLABS_HISTORY_ITEM": "ElevenLabs (bản đã chọn)",
+  "STUDIO_POLICY": "Studio (mặc định)",
+  "USER_MANUAL": "Tùy chỉnh",
+};
+function renderVoiceSync() {
+  const box = $("#qVoiceSync"); if (!box) return;
+  const c = state.voiceConfig;
+  if (!c) {
+    box.innerHTML = (state.voiceId && state.voiceChecked)
+      ? `<span class="muted">Đang dùng cấu hình Studio (mặc định).</span>` : ``;
+    return;
+  }
+  const ms = c.match_strength;
+  let line = "";
+  if (ms === "history_item")      line = `<span class="tag good">✓ Đã khớp cấu hình bản ElevenLabs đã tạo</span>`;
+  else if (ms === "history_matched") line = `<span class="tag good">✓ Đã đồng bộ cấu hình ElevenLabs</span>`;
+  else if (ms === "settings_only")   line = `<span class="tag good">✓ Đã đồng bộ cài đặt giọng</span> <span class="muted">· Model đầu ra đang dùng cấu hình Studio</span>`;
+  else if (ms === "manual")          line = `<span class="tag good">✓ Đang dùng cấu hình tùy chỉnh</span>`;
+  else line = `<span class="muted">Cấu hình: ${esc(ms || "—")}</span>`;
+  box.innerHTML = `${line}<div class="muted2" style="margin-top:2px">Model đang dùng: ${esc(c.model_id || "—")}${c.voice_name ? " · " + esc(c.voice_name) : ""}</div>`;
+}
+function renderSyncPanel() {
+  const panel = $("#syncPanel"); if (!panel) return;
+  const m = state.voiceSyncMode;
+  if (m === "history_match") {
+    panel.innerHTML = `<div class="muted">Tải lịch sử tạo giọng trên ElevenLabs cho Voice ID này, rồi chọn một bản để khớp cấu hình.</div>
+      <button class="ghost" id="qHistBtn" onclick="loadVoiceHistory()" style="margin-top:8px">Tải lịch sử</button>
+      <div id="qHistList" style="margin-top:10px"></div>`;
+    if (state.voiceHistory && state.voiceHistory.length) renderHistoryList();
+  } else if (m === "manual") {
+    const c = state.voiceConfig || {};
+    const vs = c.voice_settings || {};
+    const f = (x) => (x == null ? "" : x);
+    panel.innerHTML = `<div class="hint">Nâng cao — tự chỉnh cấu hình TTS. Thay đổi sẽ ghi đè cấu hình đồng bộ.</div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+        <label>Model <input id="mModel" value="${esc(f(c.model_id))}" placeholder="eleven_multilingual_v2" style="width:200px"/></label>
+        <label>Output <input id="mOut" value="${esc(f(c.requested_output_format))}" placeholder="mp3_44100_128" style="width:160px"/></label>
+      </div>
+      <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
+        <label>Stability <input id="mStab" type="number" step="0.01" value="${f(vs.stability)}" style="width:80px"/></label>
+        <label>Similarity <input id="mSim" type="number" step="0.01" value="${f(vs.similarity_boost)}" style="width:80px"/></label>
+        <label>Style <input id="mStyle" type="number" step="0.01" value="${f(vs.style)}" style="width:60px"/></label>
+        <label>Speed <input id="mSpeed" type="number" step="0.01" value="${f(vs.speed)}" style="width:80px"/></label>
+        <label><input id="mBoost" type="checkbox" ${vs.use_speaker_boost ? "checked" : ""}/> Speaker boost</label>
+      </div>
+      <button class="primary" onclick="applyManualConfig()" style="margin-top:10px">Áp dụng cấu hình tùy chỉnh</button>`;
+  } else {
+    const c = state.voiceConfig;
+    if (!c) {
+      panel.innerHTML = `<div class="muted">Bấm "Kiểm tra giọng" để tự đồng bộ cấu hình hiện tại của ElevenLabs.</div>`;
+      return;
+    }
+    const vs = c.voice_settings || {};
+    const d = (x) => (x == null ? "—" : x);
+    const src = (s) => SYNC_SRC_VI[s] || s || "—";
+    panel.innerHTML = `<button class="ghost tiny" onclick="resolveVoiceConfig('auto_current')">LÀM MỚI</button>
+      <details class="tech" style="margin-top:8px"><summary>Thông tin cấu hình</summary>
+      <div style="margin-top:8px;font-size:12px">
+        <div class="kv"><span class="k">Model</span><span class="v">${esc(d(c.model_id))} <span class="muted">(${esc(src(c.provenance && c.provenance.model_id))})</span></span></div>
+        <div class="kv"><span class="k">Stability</span><span class="v">${d(vs.stability)}</span></div>
+        <div class="kv"><span class="k">Similarity</span><span class="v">${d(vs.similarity_boost)}</span></div>
+        <div class="kv"><span class="k">Style</span><span class="v">${d(vs.style)}</span></div>
+        <div class="kv"><span class="k">Speaker Boost</span><span class="v">${d(vs.use_speaker_boost)}</span></div>
+        <div class="kv"><span class="k">Speed</span><span class="v">${d(vs.speed)}</span></div>
+        <div class="kv"><span class="k">Output format</span><span class="v">${esc(d(c.requested_output_format))} <span class="muted">(${esc(src(c.provenance && c.provenance.output_format))})</span></span></div>
+        <div class="kv"><span class="k">Cài đặt giọng</span><span class="v">${esc(src(c.provenance && c.provenance.voice_settings))}</span></div>
+      </div></details>`;
+  }
+}
+function renderHistoryList() {
+  const list = $("#qHistList"); if (!list) return;
+  const items = state.voiceHistory || [];
+  if (!items.length) { list.innerHTML = `<div class="muted">Chưa có bản tạo nào trên ElevenLabs cho Voice ID này.</div>`; return; }
+  list.innerHTML = items.map(it => {
+    const d = it.date_unix ? new Date(it.date_unix * 1000).toLocaleString("vi-VN") : "—";
+    const st = it.settings || {};
+    const complete = it.model_id && st.stability != null && st.similarity_boost != null;
+    return `<div style="border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px">
+      <div><b>${esc(d)}</b> · ${esc(it.model_id || "—")}</div>
+      <div class="muted2" style="margin:2px 0">"${esc(it.text_preview || "")}"</div>
+      <div class="muted" style="font-size:11px">stability ${d(st.stability)} · sim ${d(st.similarity_boost)} · style ${d(st.style)} · boost ${d(st.use_speaker_boost)} · speed ${d(st.speed)}</div>
+      ${complete ? `<button class="primary tiny" onclick="useHistoryConfig('${esc(it.history_item_id)}')" style="margin-top:6px">DÙNG CẤU HÌNH NÀY</button>` : `<span class="tag muted">Thiếu dữ liệu cấu hình</span>`}
+    </div>`;
+  }).join("");
+}
+async function loadVoiceHistory() {
+  const vid = (state.voiceId || "").trim();
+  if (!vid) return toast("Nhập Voice ID trước", "warn");
+  const list = $("#qHistList");
+  if (list) list.innerHTML = `<span class="muted">Đang tải…</span>`;
+  const r = await api("/api/elevenlabs/voices/" + encodeURIComponent(vid) + "/history");
+  if (!r.ok) { if (list) list.innerHTML = `<span class="tag bad">Không tải được lịch sử</span> <span class="muted">${esc(r.error || "")}</span>`; return; }
+  state.voiceHistory = r.items || [];
+  renderHistoryList();
+}
+async function useHistoryConfig(item_id) {
+  const vid = (state.voiceId || "").trim();
+  const r = await api("/api/elevenlabs/voice-config/resolve", { method: "POST", body: JSON.stringify({ voice_id: vid, mode: "history_match", history_item_id: item_id, voice_name: state.voiceMeta && state.voiceMeta.name }) });
+  if (!r.ok || !r.config) return toast(r.error || "Không khớp được cấu hình", "bad");
+  state.voiceConfig = r.config; state.voiceSyncMode = "history_match";
+  $$("#syncTabs .sync-tab").forEach(x => x.classList.toggle("active", x.dataset.m === "history_match"));
+  renderVoiceSync(); renderSyncPanel(); quickRefresh();
+  toast("Đã khớp cấu hình bản ElevenLabs đã tạo", "good");
+}
+async function resolveVoiceConfig(mode) {
+  const vid = (state.voiceId || "").trim();
+  if (!vid) return;
+  const box = $("#qVoiceSync");
+  if (box) box.innerHTML = `<span class="muted">Đang đồng bộ cấu hình ElevenLabs…</span>`;
+  const r = await api("/api/elevenlabs/voice-config/resolve", { method: "POST", body: JSON.stringify({ voice_id: vid, mode: mode || "auto_current", voice_name: state.voiceMeta && state.voiceMeta.name }) });
+  if (!r.ok || !r.config) {
+    // Fail-closed: API failure -> NO silent fallback. Explicit user choice only.
+    if (box) box.innerHTML = `<div><span class="tag bad">Không thể đồng bộ cấu hình ElevenLabs.</span></div>
+      <div class="actions" style="margin-top:8px"><button class="ghost tiny" onclick="resolveVoiceConfig('auto_current')">THỬ LẠI</button>
+      <button class="ghost tiny" onclick="useStudioConfig()">DÙNG CẤU HÌNH STUDIO</button></div>`;
+    state.voiceConfig = null;
+    renderSyncPanel();
+    quickRefresh();
+    return;
+  }
+  state.voiceConfig = r.config;
+  renderVoiceSync(); renderSyncPanel(); quickRefresh();
+}
+function useStudioConfig() {
+  // Explicit user action: proceed with the legacy Studio-default path (no
+  // synced ElevenLabs settings). Never silently chosen.
+  state.voiceConfig = null;
+  renderVoiceSync(); renderSyncPanel(); quickRefresh();
+  toast("Đang dùng cấu hình Studio (mặc định)", "good");
+}
+function applyManualConfig() {
+  const num = (id) => { const v = $("#" + id); const n = parseFloat(v && v.value); return isNaN(n) ? null : n; };
+  state.voiceConfig = {
+    voice_id: state.voiceId, voice_name: state.voiceMeta && state.voiceMeta.name,
+    model_id: ($("#mModel") && $("#mModel").value.trim()) || "eleven_turbo_v2_5",
+    requested_output_format: ($("#mOut") && $("#mOut").value.trim()) || "pcm_16000",
+    voice_settings: {
+      stability: num("mStab"), similarity_boost: num("mSim"),
+      style: num("mStyle"), speed: num("mSpeed"),
+      use_speaker_boost: $("#mBoost") && $("#mBoost").checked,
+    },
+    sync_mode: "manual", match_strength: "manual", history_item_id: null,
+    config_ts: (Date.now() / 1000) | 0,
+    provenance: { voice_id: "USER_SELECTION", model_id: "USER_MANUAL", voice_settings: "USER_MANUAL", output_format: "USER_MANUAL" },
+  };
+  state.voiceSyncMode = "manual";
+  renderVoiceSync(); renderSyncPanel(); quickRefresh();
+  toast("Đã áp dụng cấu hình tùy chỉnh", "good");
+}
+
 async function loadEdgeVoices() {
   try {
     const r = await api("/api/voice/edge/voices");
@@ -544,8 +731,11 @@ async function checkVoice() {
     const labels = r.labels || {};
     const lang = labels.language ? ` · ${esc(labels.language)}` : "";
     info.innerHTML = `<span class="tag good">✓ Đã tìm thấy giọng</span> ${name}${lang}`;
+    // V1.5.0: auto-sync the per-voice ElevenLabs config (Mode A) on validation.
+    if (state.ttsProvider === "elevenlabs") resolveVoiceConfig("auto_current");
   } else {
     state.voiceChecked = false; state.voiceMeta = null;
+    state.voiceConfig = null; renderVoiceSync();
     info.innerHTML = `<span class="tag bad">✗ Không hợp lệ</span> <span class="muted">${esc(r.error || "Không tìm thấy Voice ID này hoặc giọng không khả dụng.")}</span>`;
   }
 }
@@ -575,7 +765,7 @@ async function renderTest10s() {
   $("#qTestBtn").disabled = true;
   const body = state.ttsProvider === "edge"
     ? { avatar_id: av, voice_id: vid, script_text: txt, tts_provider: "EDGE_TTS_TEST", test_mode: true, test_type: "SCRIPT_PREVIEW", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta };
+    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode };
   const r = await api("/api/render/test", { method: "POST", body: JSON.stringify(body) });
   $("#qTestBtn").disabled = false;
   if (r.ok) { toast("Đã đưa kiểm tra 10 giây vào hàng đợi", "good"); switchView("history"); }
@@ -590,7 +780,7 @@ async function renderFull() {
   $("#qRenderBtn").disabled = true;
   const body = state.ttsProvider === "edge"
     ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta };
+    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode };
   const r = await api("/api/render", { method: "POST", body: JSON.stringify(body) });
   $("#qRenderBtn").disabled = false;
   if (r.ok) { toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good"); switchView("history"); }
@@ -1340,6 +1530,20 @@ function jobCardHTML(j) {
   }
   const providerTag = provider === "EDGE_TTS_TEST"
     ? `<span class="tag muted">Edge TTS</span>` : `<span class="tag good">ElevenLabs</span>`;
+  // V1.5.0: ElevenLabs voice-sync badge (from the snapshotted tts_config).
+  let syncBadge = "";
+  if (provider !== "EDGE_TTS_TEST") {
+    try {
+      const tc = j.tts_config ? JSON.parse(j.tts_config) : null;
+      if (tc) {
+        const ms = tc.match_strength;
+        if (ms === "history_item" || tc.sync_mode === "history_match") syncBadge = `<span class="tag good">Match History</span>`;
+        else if (ms === "history_matched") syncBadge = `<span class="tag good">Đồng bộ</span>`;
+        else if (ms === "settings_only") syncBadge = `<span class="tag muted">Cài đặt giọng</span>`;
+        else if (ms === "manual") syncBadge = `<span class="tag muted">Tùy chỉnh</span>`;
+      }
+    } catch (e) { /* ignore */ }
+  }
   // Distinguish TEST vs VIDEO HOÀN CHỈNH visually.
   const testBadge = isMouthTest
     ? `<span class="tag warn">TEST KHẨU HÌNH</span>`
@@ -1350,7 +1554,7 @@ function jobCardHTML(j) {
     <div class="jbody">
       <div class="jtitle">${esc(kindLabel)} · ${esc(j.avatar_id)}</div>
       <div class="jsub">Giọng: ${voiceDisplay}${voiceName && provider === "ELEVENLABS" ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
-      <div class="jbadges">${testBadge} ${providerTag}</div>
+      <div class="jbadges">${testBadge} ${providerTag} ${syncBadge}</div>
       <div class="fstatus ${j.status}">${statusLabel(j.status)}${j.error ? " · " + stageTxt : ""}</div>
       ${["rendering","encoding","verifying","preparing_audio"].includes(j.status) && j.progress != null ? `<div class="progress" style="margin-top:6px"><div style="width:${j.progress}%"></div></div>` : ""}
     </div>

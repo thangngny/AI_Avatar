@@ -71,7 +71,17 @@ def init_db() -> None:
                     edge_voice        TEXT,                       -- Edge TTS voice id when tts_provider='EDGE_TTS_TEST'
                     mouth_state_auto  TEXT,                       -- automated mouth-state evidence (raw, never overwritten)
                     mouth_state_user  TEXT,                       -- user-confirmed mouth state: 'NOT_TALKING'|'TALKING'|'UNSURE'
-                    mouth_state_provenance TEXT                   -- 'AUTO'|'USER_CONFIRMED'|'UNKNOWN'
+                    mouth_state_provenance TEXT,                  -- 'AUTO'|'USER_CONFIRMED'|'UNKNOWN'
+                    tts_config        TEXT,                       -- JSON: resolved per-voice TTS config snapshot (V1.5.0; no key)
+                    tts_config_hash   TEXT,                       -- sha1 of the resolved config (no key)
+                    sync_mode         TEXT,                       -- auto_current|history_match|manual|none
+                    history_item_id   TEXT                        -- ElevenLabs history item id (Mode B)
+                );
+
+                CREATE TABLE IF NOT EXISTS voice_configs (
+                    voice_id    TEXT PRIMARY KEY,
+                    config      TEXT NOT NULL,    -- JSON: last resolved per-voice TTS config (no key)
+                    updated_at  REAL NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS avatars (
@@ -109,6 +119,10 @@ def init_db() -> None:
                 ("mouth_state_auto", "TEXT"),
                 ("mouth_state_user", "TEXT"),
                 ("mouth_state_provenance", "TEXT"),
+                ("tts_config", "TEXT"),
+                ("tts_config_hash", "TEXT"),
+                ("sync_mode", "TEXT"),
+                ("history_item_id", "TEXT"),
             ):
                 if col not in existing:
                     conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
@@ -136,8 +150,9 @@ def create_job(job: Dict[str, Any]) -> None:
                        stage, gpu_id, pid, log_path, error, quality_result,
                        quality_warnings, user_override, truth_hash,
                        tts_provider, test_mode, test_type, edge_voice,
-                       mouth_state_auto, mouth_state_user, mouth_state_provenance)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       mouth_state_auto, mouth_state_user, mouth_state_provenance,
+                       tts_config, tts_config_hash, sync_mode, history_item_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     job["job_id"], _now(), _now(), job["kind"], job["avatar_id"],
                     job["voice_id"], job.get("voice_meta"), job.get("script_text"),
@@ -152,6 +167,8 @@ def create_job(job: Dict[str, Any]) -> None:
                     job.get("test_type"), job.get("edge_voice"),
                     job.get("mouth_state_auto"), job.get("mouth_state_user"),
                     job.get("mouth_state_provenance"),
+                    job.get("tts_config"), job.get("tts_config_hash"),
+                    job.get("sync_mode"), job.get("history_item_id"),
                 ),
             )
             conn.commit()
@@ -266,6 +283,40 @@ def list_avatar_rows() -> List[Dict[str, Any]]:
     try:
         rows = conn.execute("SELECT * FROM avatars ORDER BY avatar_id").fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Voice configs (V1.5.0) — per-voice remembered resolved TTS config            #
+# --------------------------------------------------------------------------- #
+def save_voice_config(voice_id: str, config: Dict[str, Any]) -> None:
+    """Upsert the last resolved per-voice TTS config (sanitized JSON; no key)."""
+    cfg_json = json.dumps(config, ensure_ascii=False) if isinstance(config, (dict, list)) else str(config)
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO voice_configs (voice_id, config, updated_at)
+                   VALUES (?,?,?)
+                   ON CONFLICT(voice_id) DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at""",
+                (voice_id, cfg_json, _now()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_voice_config(voice_id: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT config FROM voice_configs WHERE voice_id=?", (voice_id,)).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["config"])
+        except Exception:
+            return None
     finally:
         conn.close()
 

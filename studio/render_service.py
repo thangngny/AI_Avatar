@@ -110,21 +110,37 @@ def _master_path(script_text: str, voice_id: str, tts_provider: str) -> str:
 
 def generate_master_audio(script_text: str, voice_id: str,
                            target_sec: Optional[float] = None,
-                           tts_provider: str = ELEVENLABS) -> Dict[str, Any]:
-    """Generate ONE canonical master audio (16 kHz mono FLOAT wav) for a script
-    part + voice + provider. Reused across avatars (same text+voice+provider ->
-    same file). Both providers feed the SAME production renderer afterward.
+                           tts_provider: str = ELEVENLABS,
+                           tts_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Generate the audio for a script part + voice + provider.
+
+    V1.5.0 two-audio-path (ElevenLabs with a resolved tts_config):
+      - master_path : lossless WAV at the native sample rate of the resolved
+        requested_output_format (used for the FINAL MP4 audio). Never downsampled
+        to 16 kHz; never kept as MP3.
+      - cond_path   : 16 kHz mono WAV derived from the master (MuseTalk/Whisper
+        conditioning only).
+    Without a tts_config (legacy ElevenLabs / Edge TTS): master_path == cond_path
+    (the existing 16 kHz mono path) — backward compatible.
 
     Providers are EXPLICIT and never fall back to each other (spec B8):
-      ELEVENLABS     -> elevenlabs_client.synth_to_wav (exact voice_id, fail-closed)
+      ELEVENLABS     -> elevenlabs_client (exact voice_id, fail-closed)
       EDGE_TTS_TEST  -> edge_tts_client.synth_to_wav (no API key, no quota)
 
-    Returns {ok, path, duration_sec}."""
+    Returns {ok, master_path, cond_path, duration_sec, reused}."""
     text = (script_text or "").strip()
     if not text:
         return {"ok": False, "error": "Empty script — nothing to synthesize."}
     if not voice_id:
         return {"ok": False, "error": "No voice provided."}
+
+    # Test render: trim by words (no mid-word cut) — applies to all paths.
+    if target_sec:
+        words = text.split()
+        target_words = max(1, int(target_sec * config.WORDS_PER_SEC))
+        text = " ".join(words[:target_words])
+        if not text:
+            return {"ok": False, "error": "Script too short for a test render."}
 
     if tts_provider == EDGE_TTS_TEST:
         if not edge.is_available():
@@ -133,44 +149,58 @@ def generate_master_audio(script_text: str, voice_id: str,
         if os.path.exists(out) and os.path.getsize(out) > 1000:
             try:
                 import soundfile as sf
-                info = sf.info(out)
-                return {"ok": True, "path": out, "duration_sec": float(info.duration),
-                        "reused": True}
+                return {"ok": True, "master_path": out, "cond_path": out,
+                        "duration_sec": float(sf.info(out).duration), "reused": True}
             except Exception:
                 pass
-        if target_sec:
-            words = text.split()
-            target_words = max(1, int(target_sec * config.WORDS_PER_SEC))
-            text = " ".join(words[:target_words])
-            if not text:
-                return {"ok": False, "error": "Script too short for a test render."}
         try:
             path, dur = edge.synth_to_wav(voice_id, text, out)
         except edge.EdgeTTSUnavailable as e:
             return {"ok": False, "error": str(e)}
         except Exception as e:
             return {"ok": False, "error": f"Edge TTS failed: {e}"}
-        return {"ok": True, "path": path, "duration_sec": dur, "reused": False}
+        return {"ok": True, "master_path": path, "cond_path": path,
+                "duration_sec": dur, "reused": False}
 
-    # Default / ELEVENLABS — production path, unchanged.
+    # ELEVENLABS
     if not el.is_configured():
         return {"ok": False, "error": "ElevenLabs API key not configured."}
+
+    if tts_config:
+        # Two-audio-path: keyed by the resolved config hash (different model/
+        # settings/output_format -> fresh master). master != cond when the
+        # resolved output_format is higher-bandwidth than 16 kHz.
+        ch = el.tts_config_hash(tts_config)
+        os.makedirs(os.path.join(config.TEMP_DIR, "master"), exist_ok=True)
+        master = os.path.join(config.TEMP_DIR, "master", f"{ch}_master.wav")
+        cond = os.path.join(config.TEMP_DIR, "master", f"{ch}_cond.wav")
+        if os.path.exists(cond) and os.path.getsize(cond) > 1000:
+            try:
+                import soundfile as sf
+                return {"ok": True, "master_path": master, "cond_path": cond,
+                        "duration_sec": float(sf.info(cond).duration), "reused": True}
+            except Exception:
+                pass
+        try:
+            m, c, dur = el.synth_master_cond(voice_id, text, tts_config, master, cond)
+        except el.VoiceError as e:
+            return {"ok": False, "error": str(e), "fail_closed": True}
+        except el.TTSUnavailable as e:
+            return {"ok": False, "error": str(e)}
+        except Exception as e:
+            return {"ok": False, "error": f"TTS failed: {e}"}
+        return {"ok": True, "master_path": m, "cond_path": c,
+                "duration_sec": dur, "reused": False}
+
+    # Legacy ELEVENLABS (no resolved config): master == cond == 16 kHz mono.
     out = _master_path(text, voice_id, tts_provider)
     if os.path.exists(out) and os.path.getsize(out) > 1000:
         try:
             import soundfile as sf
-            info = sf.info(out)
-            return {"ok": True, "path": out, "duration_sec": float(info.duration),
-                    "reused": True}
+            return {"ok": True, "master_path": out, "cond_path": out,
+                    "duration_sec": float(sf.info(out).duration), "reused": True}
         except Exception:
             pass
-    if target_sec:
-        # Test render: trim by words, no mid-word cut.
-        words = text.split()
-        target_words = max(1, int(target_sec * config.WORDS_PER_SEC))
-        text = " ".join(words[:target_words])
-        if not text:
-            return {"ok": False, "error": "Script too short for a test render."}
     try:
         path, dur = el.synth_to_wav(voice_id, text, out)
     except el.VoiceError as e:
@@ -179,7 +209,8 @@ def generate_master_audio(script_text: str, voice_id: str,
         return {"ok": False, "error": str(e)}
     except Exception as e:
         return {"ok": False, "error": f"TTS failed: {e}"}
-    return {"ok": True, "path": path, "duration_sec": dur, "reused": False}
+    return {"ok": True, "master_path": path, "cond_path": path,
+            "duration_sec": dur, "reused": False}
 
 
 # --------------------------------------------------------------------------- #
@@ -239,11 +270,14 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
                     voice_meta: Optional[Dict] = None,
                     tts_provider: str = ELEVENLABS,
                     test_mode: bool = False,
-                    test_type: Optional[str] = None) -> Dict[str, Any]:
+                    test_type: Optional[str] = None,
+                    tts_config: Optional[Dict] = None,
+                    sync_mode: Optional[str] = None) -> Dict[str, Any]:
     """Create a 10-second test render job (SAME production quality as full).
 
     tts_provider selects the voice source (ELEVENLABS / EDGE_TTS_TEST). Both
-    feed the same locked production renderer; only the audio source differs."""
+    feed the same locked production renderer; only the audio source differs.
+    V1.5.0: a resolved ElevenLabs tts_config is snapshotted into the job."""
     provider = _provider_for(tts_provider)
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
@@ -256,6 +290,9 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
 
     job_id = _new_job_id()
     out = _output_path("test10s", avatar_id, "test10s", job_id)
+    tts_config_json = json.dumps(tts_config, ensure_ascii=False) if tts_config else None
+    tts_config_hash = el.tts_config_hash(tts_config) if tts_config else None
+    hist_id = (tts_config or {}).get("history_item_id") if tts_config else None
     db.create_job({
         "job_id": job_id, "kind": "test10s", "avatar_id": avatar_id,
         "voice_id": voice_id, "voice_meta": json.dumps(voice_meta, ensure_ascii=False) if voice_meta else None,
@@ -266,6 +303,8 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         "tts_provider": provider, "test_mode": 1 if test_mode else 0,
         "test_type": test_type or (TEST_TYPE_SCRIPT_PREVIEW if test_mode else None),
         "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
+        "tts_config": tts_config_json, "tts_config_hash": tts_config_hash,
+        "sync_mode": sync_mode, "history_item_id": hist_id,
     })
     _wake_worker()
     return {"ok": True, "job_id": job_id}
@@ -309,8 +348,14 @@ def create_mouth_test_job(avatar_id: str, edge_voice: str,
 def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
                      split_mode: str = "full",
                      voice_meta: Optional[Dict] = None,
-                     tts_provider: str = ELEVENLABS) -> Dict[str, Any]:
-    """Create one or more full-render jobs (one per script part)."""
+                     tts_provider: str = ELEVENLABS,
+                     tts_config: Optional[Dict] = None,
+                     sync_mode: Optional[str] = None) -> Dict[str, Any]:
+    """Create one or more full-render jobs (one per script part).
+
+    V1.5.0: tts_config (the resolved per-voice ElevenLabs config) is snapshotted
+    into each job at submission, with a deterministic tts_config_hash. The
+    render uses that snapshot — it never re-fetches/settings mid-job."""
     provider = _provider_for(tts_provider)
     from . import script_service
     av = avatar_service.list_avatars()
@@ -325,6 +370,9 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
     sp = script_service.split_script(script_text, split_mode)
     if not sp["ok"]:
         return sp
+    tts_config_json = json.dumps(tts_config, ensure_ascii=False) if tts_config else None
+    tts_config_hash = el.tts_config_hash(tts_config) if tts_config else None
+    hist_id = (tts_config or {}).get("history_item_id") if tts_config else None
     job_ids = []
     for part in sp["parts"]:
         job_id = _new_job_id()
@@ -343,6 +391,8 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
             "tts_provider": provider, "test_mode": 0,
             "test_type": TEST_TYPE_PRODUCTION,
             "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
+            "tts_config": tts_config_json, "tts_config_hash": tts_config_hash,
+            "sync_mode": sync_mode, "history_item_id": hist_id,
         })
         job_ids.append(job_id)
     _wake_worker()
@@ -487,23 +537,32 @@ def _run_job(job_id: str, gpu_id: int) -> None:
     #    the same locked production renderer. test10s / mouhtest -> ~10s trim.
     provider = job.get("tts_provider") or ELEVENLABS
     target_sec = 10.0 if job["kind"] in ("test10s", "mouhtest") else None
+    tts_config = db.parse_json_field(job.get("tts_config"))  # resolved per-voice config (V1.5.0) or None
     audio = generate_master_audio(job["script_text"], job["voice_id"],
-                                  target_sec=target_sec, tts_provider=provider)
+                                  target_sec=target_sec, tts_provider=provider,
+                                  tts_config=tts_config)
     if not audio["ok"]:
         db.update_job(job_id, status="failed", stage="Failed", error=audio["error"])
         gpu_service.release(gpu_id)
         return
-    db.update_job(job_id, master_audio_path=audio["path"],
+    cond_path = audio["cond_path"]
+    master_path = audio["master_path"]
+    db.update_job(job_id, master_audio_path=master_path,
                   duration_sec=audio.get("duration_sec"),
                   stage="Rendering Lip-sync", progress=5)
 
-    # 2) Run the production renderer with the locked truth.
+    # 2) Run the production renderer with the locked truth. MuseTalk conditioning
+    #    uses cond_path (16 kHz mono, unchanged). The final MP4 audio comes from
+    #    master_path when it differs from cond_path (V1.5.0 two-audio-path); else
+    #    --master-audio is omitted (legacy backward-compatible behavior).
     out = job["output_path"]
     cmd = [_torch_python(),
            config.RENDERER,
            "--avatar_id", job["avatar_id"],
-           "--audio", audio["path"],
+           "--audio", cond_path,
            "--output", out]
+    if master_path and master_path != cond_path:
+        cmd += ["--master-audio", master_path]
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     env["LIVETALKING_GPU_ID"] = "0"

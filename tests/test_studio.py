@@ -1017,5 +1017,284 @@ class TestShareGate(StudioTestCase):
         share_auth.disable()
 
 
+# --------------------------------------------------------------------------- #
+# V1.5.0 — ElevenLabs voice config auto-sync + generation matching           #
+# --------------------------------------------------------------------------- #
+from unittest import mock as _mock
+
+
+class TestVoiceSyncResolve(StudioTestCase):
+    """Generic per-voice config resolution (Mode A matching-history-first,
+    Mode B exact item, Mode C manual). No voice-id special-casing; no global
+    hardcode of any specific model/output_format."""
+
+    def setUp(self):
+        super().setUp()
+        from studio import elevenlabs_client as el
+        self.el = el
+        self._orig = (el.get_voice_settings, el.get_voice_history,
+                      el.get_history_item, el.is_configured, el.model_id)
+        el.is_configured = lambda: True
+        el.model_id = lambda: "eleven_turbo_v2_5"
+        el._CACHE.clear()
+
+    def tearDown(self):
+        from studio import elevenlabs_client as el
+        (el.get_voice_settings, el.get_voice_history, el.get_history_item,
+         el.is_configured, el.model_id) = self._orig
+        super().tearDown()
+
+    @staticmethod
+    def _A():
+        return {"stability": 0.5, "similarity_boost": 1.0, "style": 0.0,
+                "use_speaker_boost": True, "speed": 1.06}
+
+    @staticmethod
+    def _B():
+        return {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0,
+                "use_speaker_boost": True, "speed": 1.0}
+
+    def test_mode_a_picks_matching_not_newest(self):
+        # CASE 1: current = A; newest history = B; older history = A.
+        # Mode A must choose the OLDER matching A item, NOT the newest B.
+        A, B = self._A(), self._B()
+        self.el.get_voice_settings = lambda vid, refresh=False: {"ok": True, "settings": A}
+        self.el.get_voice_history = lambda vid, limit=10, refresh=False: {"ok": True, "items": [
+            {"history_item_id": "newB", "model_id": "eleven_turbo_v2_5", "settings": B, "date_unix": 2},
+            {"history_item_id": "oldA", "model_id": "eleven_multilingual_v2", "settings": A, "date_unix": 1},
+        ]}
+        self.el.get_history_item = lambda hid: {"ok": True, "item": {
+            "history_item_id": hid, "model_id": ("eleven_multilingual_v2" if hid == "oldA" else "eleven_turbo_v2_5"),
+            "settings": (A if hid == "oldA" else B),
+            "output_format": ("mp3_44100_128" if hid == "oldA" else "pcm_16000")}}
+        r = self.el.resolve_config("V1", mode="auto_current")
+        self.assertTrue(r["ok"])
+        c = r["config"]
+        self.assertEqual(c["match_strength"], "history_matched")
+        self.assertEqual(c["model_id"], "eleven_multilingual_v2")      # older matching item
+        self.assertEqual(c["requested_output_format"], "mp3_44100_128")
+        self.assertEqual(c["history_item_id"], "oldA")
+        self.assertEqual(c["provenance"]["model_id"], "MATCHING_HISTORY_GENERATION")
+
+    def test_mode_a_no_matching_history_falls_to_studio_policy(self):
+        # CASE 2: current = A; no history item matches A -> settings synced, but
+        # model/output use the explicit Studio policy (NOT a hardcode of the
+        # reference values). Truthful provenance STUDIO_POLICY.
+        A, B = self._A(), self._B()
+        self.el.get_voice_settings = lambda vid, refresh=False: {"ok": True, "settings": A}
+        self.el.get_voice_history = lambda vid, limit=10, refresh=False: {"ok": True, "items": [
+            {"history_item_id": "newB", "model_id": "eleven_turbo_v2_5", "settings": B}]}
+        self.el.get_history_item = lambda hid: {"ok": True, "item": {
+            "history_item_id": hid, "model_id": "eleven_turbo_v2_5", "settings": B,
+            "output_format": "pcm_16000"}}
+        r = self.el.resolve_config("V1", mode="auto_current")
+        self.assertTrue(r["ok"])
+        c = r["config"]
+        self.assertEqual(c["match_strength"], "settings_only")
+        self.assertEqual(c["model_id"], "eleven_turbo_v2_5")            # Studio policy
+        self.assertEqual(c["requested_output_format"], "pcm_16000")
+        self.assertEqual(c["provenance"]["model_id"], "STUDIO_POLICY")
+        self.assertEqual(c["provenance"]["voice_settings"], "ELEVENLABS_VOICE_SETTINGS_API")
+        # no hardcode of the reference values
+        self.assertNotEqual(c["model_id"], "eleven_multilingual_v2")
+        self.assertNotEqual(c["requested_output_format"], "mp3_44100_128")
+
+    def test_mode_a_settings_api_failure_fails_closed(self):
+        # CASE 3: settings API errors -> NO silent fallback. Distinct from CASE 2.
+        self.el.get_voice_settings = lambda vid, refresh=False: {"ok": False, "error": "ElevenLabs returned 500", "http_status": 500}
+        r = self.el.resolve_config("V1", mode="auto_current")
+        self.assertFalse(r["ok"])
+        self.assertTrue(r.get("fail_closed"))
+        self.assertEqual(r.get("stage"), "settings_api_failed")
+        self.assertNotIn("config", r)
+
+    def test_mode_b_history_item_exact_public_config(self):
+        A = self._A()
+        self.el.get_history_item = lambda hid: {"ok": True, "item": {
+            "history_item_id": hid, "voice_id": "V1", "model_id": "eleven_multilingual_v2",
+            "settings": A, "output_format": "mp3_44100_128", "source": "TTS"}}
+        r = self.el.resolve_config("V1", mode="history_match", history_item_id="h1")
+        self.assertTrue(r["ok"])
+        c = r["config"]
+        self.assertEqual(c["match_strength"], "history_item")
+        self.assertEqual(c["model_id"], "eleven_multilingual_v2")
+        self.assertEqual(c["requested_output_format"], "mp3_44100_128")
+        self.assertEqual(c["history_item_id"], "h1")
+        self.assertEqual(c["provenance"]["voice_settings"], "ELEVENLABS_HISTORY_ITEM")
+
+    def test_tts_config_hash_deterministic(self):
+        c1 = {"voice_id": "V1", "model_id": "m", "voice_settings": self._A(),
+              "requested_output_format": "mp3_44100_128"}
+        c2 = dict(c1)
+        self.assertEqual(self.el.tts_config_hash(c1), self.el.tts_config_hash(c2))
+        c3 = {**c1, "voice_settings": {**c1["voice_settings"], "speed": 0.9}}
+        self.assertNotEqual(self.el.tts_config_hash(c1), self.el.tts_config_hash(c3))
+        # no key material in the hash input
+        self.assertNotIn("api_key", self.el.tts_config_hash(c1))
+
+    def test_master_storage_format_honest(self):
+        # The internal master is a WAV at the native rate; never reported as MP3.
+        self.assertEqual(self.el._master_storage_format("mp3_44100_128"), "wav_44100")
+        self.assertEqual(self.el._master_storage_format("pcm_16000"), "wav_16000")
+        self.assertEqual(self.el._master_storage_format("pcm_44100"), "wav_44100")
+
+
+class TestRequestMapping(StudioTestCase):
+    """The outgoing ElevenLabs synthesis request must match the resolved config
+    (Phase 20). Mocks requests.post; asserts body + query == resolved config."""
+
+    def test_synth_config_body_matches_resolved(self):
+        from studio import elevenlabs_client as el
+        cfg = {"model_id": "eleven_multilingual_v2",
+               "voice_settings": {"stability": 0.5, "similarity_boost": 1.0,
+                                  "style": 0.0, "use_speaker_boost": True, "speed": 1.06},
+               "requested_output_format": "mp3_44100_128"}
+        captured = {}
+
+        class FakeResp:
+            status_code = 200
+            content = b"\x00" * 100
+            text = ""
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return FakeResp()
+
+        with _mock.patch.object(el, "is_configured", return_value=True), \
+             _mock.patch.object(el.requests, "post", side_effect=fake_post):
+            el._synth_config("V1", "Xin chào.", cfg)
+        body = captured["json"]
+        self.assertEqual(body["model_id"], "eleven_multilingual_v2")
+        self.assertEqual(body["voice_settings"]["stability"], 0.5)
+        self.assertEqual(body["voice_settings"]["similarity_boost"], 1.0)
+        self.assertEqual(body["voice_settings"]["style"], 0.0)
+        self.assertTrue(body["voice_settings"]["use_speaker_boost"])
+        self.assertEqual(body["voice_settings"]["speed"], 1.06)
+        self.assertIn("output_format=mp3_44100_128", captured["url"])
+        # no API key leaked into the body
+        self.assertNotIn("xi-api-key", body)
+
+
+class TestVoiceSwitchNoLeak(StudioTestCase):
+    """Switching Voice ID must not leak the previous voice's config (Phase 7)."""
+
+    def setUp(self):
+        super().setUp()
+        from studio import elevenlabs_client as el
+        self.el = el
+        self._orig = (el.get_voice_settings, el.get_voice_history, el.is_configured)
+        el.is_configured = lambda: True
+        el._CACHE.clear()
+
+    def tearDown(self):
+        from studio import elevenlabs_client as el
+        (el.get_voice_settings, el.get_voice_history, el.is_configured) = self._orig
+        super().tearDown()
+
+    def test_resolve_per_voice_no_cross_contamination(self):
+        A = {"stability": 0.5, "similarity_boost": 1.0, "style": 0.0,
+             "use_speaker_boost": True, "speed": 1.06}
+        B = {"stability": 0.5, "similarity_boost": 0.8, "style": 0.0,
+             "use_speaker_boost": True, "speed": 1.0}
+        self.el.get_voice_settings = lambda vid, refresh=False: \
+            {"ok": True, "settings": (A if vid == "V1" else B)}
+        self.el.get_voice_history = lambda vid, limit=10, refresh=False: {"ok": True, "items": []}
+        r1 = self.el.resolve_config("V1")
+        r2 = self.el.resolve_config("V2")
+        self.assertEqual(r1["config"]["voice_settings"]["similarity_boost"], 1.0)
+        self.assertEqual(r2["config"]["voice_settings"]["similarity_boost"], 0.8)
+        self.assertNotEqual(r2["config"]["voice_settings"], r1["config"]["voice_settings"])
+
+    def test_job_snapshots_config_unaffected_by_later_switch(self):
+        from studio import db, render_service, avatar_service, elevenlabs_client as el
+        ready = [a for a in avatar_service.list_avatars() if a["ready"]]
+        if not ready:
+            self.skipTest("no prepared avatar on disk")
+        av = ready[0]["avatar_id"]
+        el.is_configured = lambda: True
+        cfgA = {"voice_id": "V1", "model_id": "m1",
+                "voice_settings": {"stability": 0.5, "similarity_boost": 1.0, "style": 0.0,
+                                   "use_speaker_boost": True, "speed": 1.0},
+                "requested_output_format": "pcm_16000", "sync_mode": "auto_current",
+                "match_strength": "settings_only", "provenance": {}}
+        cfgB = {**cfgA, "voice_id": "V2", "model_id": "m2",
+                "voice_settings": {**cfgA["voice_settings"], "similarity_boost": 0.8}}
+        rA = render_service.create_full_jobs(av, "V1", "Xin chào.", "full",
+                                             tts_provider=render_service.ELEVENLABS,
+                                             tts_config=cfgA, sync_mode="auto_current")
+        self.assertTrue(rA["ok"])
+        jA = db.get_job(rA["job_ids"][0])
+        self.assertEqual(jA["voice_id"], "V1")
+        self.assertEqual(jA["sync_mode"], "auto_current")
+        self.assertEqual(jA["tts_config_hash"], el.tts_config_hash(cfgA))
+        # "switch" to V2 with a different config
+        rB = render_service.create_full_jobs(av, "V2", "Xin chào.", "full",
+                                             tts_provider=render_service.ELEVENLABS,
+                                             tts_config=cfgB, sync_mode="auto_current")
+        jB = db.get_job(rB["job_ids"][0])
+        self.assertEqual(jB["voice_id"], "V2")
+        self.assertNotEqual(jA["tts_config_hash"], jB["tts_config_hash"])
+        # the original V1 job is unchanged by the later switch
+        jA2 = db.get_job(rA["job_ids"][0])
+        self.assertEqual(jA2["voice_id"], "V1")
+        self.assertEqual(jA2["tts_config_hash"], el.tts_config_hash(cfgA))
+
+
+class TestPerVoiceConfigPersistence(StudioTestCase):
+    def test_save_get_voice_config(self):
+        from studio import db
+        db.save_voice_config("V1", {"voice_id": "V1", "model_id": "m"})
+        self.assertEqual(db.get_voice_config("V1")["model_id"], "m")
+        db.save_voice_config("V1", {"voice_id": "V1", "model_id": "m2"})  # upsert
+        self.assertEqual(db.get_voice_config("V1")["model_id"], "m2")
+        self.assertIsNone(db.get_voice_config("NOPE"))
+
+
+class TestEdgeNoVoiceSync(StudioTestCase):
+    """Edge TTS must not trigger ElevenLabs voice-config sync (no provider crossover)."""
+
+    def test_edge_path_does_not_call_elevenlabs_sync(self):
+        from studio import render_service, elevenlabs_client as el, edge_tts_client as edge
+        import numpy as np, soundfile as sf
+        el_synth = _mock.Mock(side_effect=AssertionError("ElevenLabs synth must not be called for Edge"))
+        orig_avail = edge.is_available
+        orig_synth = edge.synth_to_wav
+        edge.is_available = lambda: True
+        def fake_edge(vid, text, out):
+            sf.write(out, np.zeros(16000, dtype=np.float32), 16000, subtype="FLOAT")
+            return out, 1.0
+        edge.synth_to_wav = fake_edge
+        el.synth_master_cond = el_synth
+        try:
+            r = render_service.generate_master_audio(
+                "Xin chào. Đây là test.", "vi-VN-HoaiMyNeural",
+                tts_provider=render_service.EDGE_TTS_TEST,
+                tts_config={"model_id": "eleven_multilingual_v2"})  # tts_config MUST be ignored for Edge
+        finally:
+            edge.is_available = orig_avail
+            edge.synth_to_wav = orig_synth
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["master_path"], r["cond_path"])  # Edge: master == cond (16k)
+        el_synth.assert_not_called()
+
+
+class TestRendererMasterAudio(StudioTestCase):
+    """V1.5.0 audio-only renderer change: --master-audio routes the final mux
+    audio from the lossless master; MuseTalk conditioning still uses --audio."""
+
+    def test_renderer_supports_master_audio_arg(self):
+        from studio import config
+        with open(config.RENDERER, "r", encoding="utf-8") as f:
+            src = f.read()
+        self.assertIn("--master-audio", src)
+        self.assertIn("mux_audio = master_audio if master_audio else audio_path", src)
+        # MuseTalk conditioning still reads audio_path (16k), unchanged.
+        self.assertIn("sf.read(audio_path", src)
+        # The locked truth is still loaded (production truth unchanged).
+        self.assertIn("load_render_truth", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

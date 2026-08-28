@@ -223,7 +223,7 @@ def _build_graph_runner(model, batch_size, model_dtype):
     return runner, ok
 
 
-def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0):
+def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0, master_audio=None):
     vae, unet, pe, timesteps, audio_processor = model
     frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle = avatar_data
     wav_data, sr = sf.read(audio_path, dtype='float32')
@@ -417,8 +417,13 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     elapsed = _time.perf_counter() - render_start
     print(f'Render done: {frames_done} frames in {elapsed:.1f}s = {frames_done/elapsed:.1f} fps')
 
+    # V1.5.0 two-audio-path: MuseTalk conditioning uses audio_path (16 kHz mono,
+    # unchanged). The FINAL MP4 audio comes from master_audio when provided
+    # (the lossless ElevenLabs master at native sample rate); else falls back to
+    # audio_path (legacy behavior — final audio == 16 kHz conditioning).
+    mux_audio = master_audio if master_audio else audio_path
     print('Muxing audio + video with ffmpeg...')
-    subprocess.run(['ffmpeg','-y','-i',temp_video_path,'-i',audio_path,
+    subprocess.run(['ffmpeg','-y','-i',temp_video_path,'-i',mux_audio,
                     '-c:v','libx264','-preset','ultrafast','-c:a','aac','-b:a','192k',
                     '-shortest','-movflags','+faststart',output_path],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -461,6 +466,11 @@ def main():
                         help='text script for EdgeTTS (VARIABLE input). Required unless --audio.')
     parser.add_argument('--audio', default=None,
                         help='master WAV audio file (VARIABLE input). Skips TTS. Required unless --script.')
+    parser.add_argument('--master-audio', default=None,
+                        help='V1.5.0: high-quality ElevenLabs master audio for the FINAL MP4 '
+                             'audio track. If omitted, the final audio is muxed from --audio '
+                             '(16kHz conditioning) — legacy behavior. MuseTalk conditioning '
+                             'always uses the 16kHz --audio.')
     parser.add_argument('--output', default=os.path.join('D:\\', 'CongThang_AI_Avatar', 'renders', 'output.mp4'))
     parser.add_argument('--voice', default='vi-VN-HoaiMyNeural',
                         help='EdgeTTS voice (convenience; NOT part of the render truth)')
@@ -529,7 +539,7 @@ def main():
     out_dir = os.path.dirname(os.path.abspath(args.output))
     os.makedirs(out_dir, exist_ok=True)
 
-    def _render(wav_path):
+    def _render(wav_path, master_audio=None):
         print('Loading MuseTalk model...')
         vae, unet, pe = load_all_model()
         pe = pe.half().to(device)
@@ -543,7 +553,8 @@ def main():
                      fps=eff['fps'], batch_size=args.batch_size, face_enhance=args.face_enhance,
                      audio_feature_offset_frames=eff['audio_feature_offset_frames'],
                      audio_context_left=eff['audio_context_left'],
-                     audio_conditioning_gain=eff['audio_conditioning_gain'])
+                     audio_conditioning_gain=eff['audio_conditioning_gain'],
+                     master_audio=master_audio)
 
     setup_torch_flags()
 
@@ -565,7 +576,7 @@ def main():
             wav16k = os.path.join(tmpdir, 'audio16k.wav')
             print('Normalizing master audio to 16kHz mono...')
             convert_audio_to_wav(args.audio, wav16k)
-            _render(wav16k)
+            _render(wav16k, master_audio=args.master_audio)
         finally:
             shutil.rmtree(tmpdir, ignore_errors=True)
     else:

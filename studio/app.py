@@ -750,6 +750,71 @@ def voice_preview_file(name):
 
 
 # --------------------------------------------------------------------------- #
+# Voice — ElevenLabs config auto-sync (V1.5.0)                                #
+# --------------------------------------------------------------------------- #
+# All browser-facing responses are SANITIZED: the API key / auth headers are
+# never returned. History text is exposed only as a short preview (config
+# matching, not script replacement). The browser never calls ElevenLabs
+# directly — all calls go through this backend with the server-side key.
+
+@app.route("/api/elevenlabs/voices/<voice_id>/settings")
+def el_voice_settings(voice_id):
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify(el.get_voice_settings(voice_id, refresh=refresh))
+
+
+@app.route("/api/elevenlabs/voices/<voice_id>/history")
+def el_voice_history(voice_id):
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    limit = int(request.args.get("limit", "10"))
+    return jsonify(el.get_voice_history(voice_id, limit=limit, refresh=refresh))
+
+
+@app.route("/api/elevenlabs/history/<history_item_id>")
+def el_history_item(history_item_id):
+    return jsonify(el.get_history_item(history_item_id))
+
+
+@app.route("/api/elevenlabs/voice-config/resolve", methods=["POST"])
+def el_resolve_config():
+    """Resolve an explicit per-voice TTS config (Mode A auto / Mode B history /
+    Mode C manual). Returns the sanitized resolved config + provenance + hash,
+    or a fail-closed error (never silently substitutes). Also persists the
+    per-voice config so switching back to this voice remembers it."""
+    data = request.get_json(silent=True) or {}
+    vid = (data.get("voice_id") or "").strip()
+    mode = data.get("mode") or "auto_current"
+    r = el.resolve_config(
+        vid, mode=mode,
+        history_item_id=data.get("history_item_id"),
+        overrides=data.get("overrides"),
+        voice_name=data.get("voice_name"),
+        refresh=data.get("refresh", False),
+    )
+    if r.get("ok"):
+        cfg = r["config"]
+        try:
+            db.save_voice_config(vid, cfg)
+        except Exception:
+            pass
+    return jsonify(r)
+
+
+@app.route("/api/elevenlabs/voice-config/<voice_id>")
+def el_get_voice_config(voice_id):
+    """Load the last resolved per-voice config (if any). Used when the user
+    switches back to a previously-synced voice."""
+    cfg = db.get_voice_config(voice_id)
+    return jsonify({"ok": bool(cfg), "config": cfg})
+
+
+@app.route("/api/elevenlabs/models")
+def el_models():
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify(el.get_models(refresh=refresh))
+
+
+# --------------------------------------------------------------------------- #
 # Voice — Edge TTS free test provider (spec Part B)                          #
 # --------------------------------------------------------------------------- #
 @app.route("/api/voice/edge/voices")
@@ -825,7 +890,9 @@ def render_test():
         data.get("script_text", ""), data.get("voice_meta"),
         tts_provider=data.get("tts_provider", render_service.ELEVENLABS),
         test_mode=bool(data.get("test_mode", False)),
-        test_type=data.get("test_type")))
+        test_type=data.get("test_type"),
+        tts_config=data.get("tts_config"),
+        sync_mode=data.get("sync_mode")))
 
 
 @app.route("/api/render/mouth-test", methods=["POST"])
@@ -849,7 +916,9 @@ def render_full():
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("split_mode", "full"),
         data.get("voice_meta"),
-        tts_provider=data.get("tts_provider", render_service.ELEVENLABS)))
+        tts_provider=data.get("tts_provider", render_service.ELEVENLABS),
+        tts_config=data.get("tts_config"),
+        sync_mode=data.get("sync_mode")))
 
 
 @app.route("/api/render/jobs")

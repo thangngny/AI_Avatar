@@ -34,6 +34,10 @@ LOG_DIR = os.path.join(RUNTIME_DIR, "logs")            # per-job technical logs
 # --- ElevenLabs ----------------------------------------------------------
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_VOICE_URL = "https://api.elevenlabs.io/v1/voices/{voice_id}"
+ELEVENLABS_VOICE_SETTINGS_URL = "https://api.elevenlabs.io/v1/voices/{voice_id}/settings"
+ELEVENLABS_MODELS_URL = "https://api.elevenlabs.io/v1/models"
+ELEVENLABS_HISTORY_URL = "https://api.elevenlabs.io/v1/history"
+ELEVENLABS_HISTORY_ITEM_URL = "https://api.elevenlabs.io/v1/history/{history_item_id}"
 # pcm_16000 mono: matches the validated offline TTS path (experiments/
 # elevenlabs_tts_render.py). Whisper/musetalk run at 16kHz internally.
 ELEVENLABS_OUTPUT_FORMAT = "pcm_16000"
@@ -42,6 +46,11 @@ ELEVENLABS_TIMEOUT_SEC = 120
 TTS_MAX_TEXT_CHARS = 4800
 # Vietnamese ~180 wpm (measured in the validated batch).
 WORDS_PER_SEC = 3.0
+# Server-side cache TTLs for ElevenLabs metadata (seconds). These are metadata
+# GETs only (no TTS quota). [LÀM MỚI]/refresh bypasses the cache.
+ELEVENLABS_SETTINGS_CACHE_TTL = 300      # voice settings: 5 min
+ELEVENLABS_MODELS_CACHE_TTL = 1800      # models: 30 min
+ELEVENLABS_HISTORY_CACHE_TTL = 120      # history: 2 min (short — settings change)
 
 # --- Render job scheduling ----------------------------------------------
 # One render process per GPU (job-level parallelism). Each subprocess gets
