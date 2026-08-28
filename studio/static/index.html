@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="vi" data-theme="dark">
+<html lang="vi" data-theme="light">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -14,6 +14,10 @@
       <span class="logo">🎬</span>
       <span class="title">AI AVATAR STUDIO</span>
     </div>
+    <button class="nav-item home-link" data-view="home" title="Trang chủ">
+      <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/></svg>
+      <span>Trang chủ</span>
+    </button>
     <div class="status-pill" id="globalStatus">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">ĐANG KIỂM TRA…</span>
@@ -21,13 +25,36 @@
   </header>
 
   <div class="layout">
-    <nav class="sidebar">
-      <button class="nav-item active" data-view="quick">▶ Tạo video nhanh</button>
-      <button class="nav-item" data-view="create">＋ Tạo AI Avatar mới</button>
-      <button class="nav-item" data-view="library">📁 Thư viện AI Avatar</button>
-      <button class="nav-item" data-view="history">🕘 Lịch sử render</button>
-      <button class="nav-item" data-view="settings">⚙ Cài đặt</button>
-      <div class="sysstat-mini" id="sysstatMini"></div>
+    <nav class="sidebar" id="sidebar">
+      <div class="nav-section">TẠO</div>
+      <button class="nav-item" data-view="quick">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+        <span>Tạo video</span>
+      </button>
+      <button class="nav-item" data-view="create">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 5a3 3 0 0 1 3 3v1h2v10H7V9h2V8a3 3 0 0 1 3-3zm0 2a1 1 0 0 0-1 1v1h2V8a1 1 0 0 0-1-1z"/></svg>
+        <span>Tạo Avatar</span>
+      </button>
+
+      <div class="nav-section">THƯ VIỆN</div>
+      <button class="nav-item" data-view="library">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M4 6h4l2-2h8v14H4z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+        <span>Thư viện Avatar</span>
+      </button>
+      <button class="nav-item" data-view="history">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 8v5l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        <span>Lịch sử render</span>
+      </button>
+
+      <div class="nav-section">HỆ THỐNG</div>
+      <button class="nav-item" data-view="status">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 2a7 7 0 0 0-7 7c0 2 .8 3.4 2 5 1 1.2 1 2 1 3h8c0-1 0-1.8 1-3 1.2-1.6 2-3 2-5a7 7 0 0 0-7-7zM9 20h6M10 23h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Trạng thái hệ thống</span>
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span>Cài đặt</span>
+      </button>
     </nav>
 
     <main class="content" id="content"><!-- views injected here --></main>
