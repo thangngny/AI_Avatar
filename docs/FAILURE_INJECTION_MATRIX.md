@@ -25,4 +25,21 @@ Evidence from safe, isolated drills (2026-08-28). No production data touched; no
 | Disk low | preflight disk check | warn/block | preflight warns <15GB repo / <20GB renders | PROVEN_REAL (preflight) | clean/move data | PASS |
 
 ## Evidence classification totals
-PROVEN_REAL: 9 · PROVEN_STATIC: 8 · UNIT_TEST_ONLY: 1 · UNKNOWN: 0 · FAIL: 0
+PROVEN_REAL: 14 · PROVEN_STATIC: 8 · UNIT_TEST_ONLY: 2 · UNKNOWN: 0 · FAIL: 0
+
+## V1.4.1 additional drills
+
+| Scenario | How simulated | Expected | Actual | Evidence | Recovery | Status |
+|---|---|---|---|---|---|---|
+| Stale in-flight job after restart | unit: insert 'rendering'/'preparing_audio' jobs then `_reconcile_inflight_jobs()` | transient->failed, complete/queued untouched | both marked failed "khởi động lại"; complete+queued unchanged | UNIT_TEST (TestReconcileInflight) | retry from History | PASS |
+| ffprobe unavailable (no fabrication) | unit: monkeypatch `_ffprobe`->None then verify() | honest ok=False | ok=False + "ffprobe unavailable" warning | UNIT_TEST (TestVerifyFallback) | install ffprobe | PASS |
+| ffprobe resolution | `ffprobe_resolved()` | returns a path | ffprobe.EXE on PATH | PROVEN_REAL | n/a | PASS |
+| Representative avatar backup | `backup_avatars.py --avatars doTrang_closeup,mc_hamai_mid` | copy + sha256 manifest | 1480 files + manifest | PROVEN_REAL | n/a | PASS |
+| Representative avatar restore | restore to isolated location, re-checksum, `_check_ready`, render from restored copy | checksums match, ready, valid render | 0 mismatches, ready=True both, 1080x1920 25fps render | PROVEN_REAL | n/a | PASS |
+| DB backup + retention | `backup_studio.py --retain 14` | bundle + prune old | bundle created, old pruned | PROVEN_REAL | n/a | PASS |
+| Fresh-env rebuild | new venv (system py310) + pip install from requirements-handover.lock + cu121 index (NOT a copy of old site-packages) | all imports + torch+CUDA | all 9 steps ok; torch 2.5.1+cu121 CUDA 12.1 2 GPU | PROVEN_REAL | n/a | PASS |
+| Fresh-env locked render | run generate_video_from_script.py with fresh-env python on doTrang_closeup (CUDA_VISIBLE_DEVICES=1) | valid 1080x1920 25fps MP4, locked truth | 1080x1920 25fps audio+video 8.04s; log shows offset -3 gain 1.5 cuda_graph=true | PROVEN_REAL | n/a | PASS |
+| Truth hash compare | sha1(render_truth.json) existing vs fresh env | identical | a5a0e55f... == a5a0e55f... | PROVEN_REAL | n/a | PASS |
+| ElevenLabs rebuild | fresh-env elevenlabs_client import + is_configured + check_voice (no synthesis) | configured + voice/check ok | configured=True, voice/check ok=True (no quota) | PROVEN_REAL | n/a | PASS |
+| Log cleanup dry-run | `cleanup.py --dry-run` | list old logs, none deleted | 0 to delete (all recent) | PROVEN_REAL | n/a | PASS |
+| Day-1 handover | operator path via tooling only | all steps executable | preflight SẴN SÀNG, studio up, EL configured, backup+integrity ok, cloudflared+launchers present | PROVEN_REAL | n/a | PASS |

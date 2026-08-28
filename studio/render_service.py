@@ -626,3 +626,24 @@ def _tail(path: str, n: int) -> str:
 def start() -> None:
     load_truth()
     db.init_db()
+    _reconcile_inflight_jobs()
+
+
+# Transient states that imply a child process was running. If the Studio process
+# died and restarted, those children are gone — the jobs cannot still be running.
+_TRANSIENT = ("preparing_audio", "preparing_avatar", "rendering", "encoding", "verifying")
+
+
+def _reconcile_inflight_jobs() -> None:
+    """On startup, any job left in a transient state by a previous Studio crash
+    is honestly marked failed — its child process died with the old Studio and
+    the in-memory GPU busy-set is fresh (so GPUs are already reusable). Does NOT
+    auto-retry expensive jobs; the operator chooses retry from History. (V1.4.1 R06)"""
+    try:
+        stuck = db.list_jobs_in_statuses(_TRANSIENT)
+    except Exception:
+        return
+    for j in stuck:
+        db.update_job(j["job_id"], status="failed", stage="Interrupted",
+                      progress=0,
+                      error="Studio đã khởi động lại trong khi job đang chạy.")

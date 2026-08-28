@@ -56,6 +56,7 @@
 - SYMPTOM: job stays Đang render, no % change.
 - CHECK: a watchdog kills a truly hung renderer after 300s of no stdout (or 4h hard cap). If it's still progressing slowly, wait.
 - FIX: if truly stuck, History → Hủy, then Thử lại.
+- AFTER STUDIO RESTART (V1.4.1): any job that was running when Studio died is auto-marked "failed" with "Studio đã khởi động lại trong khi job đang chạy." — it is NOT left stuck. Click Thử lại to re-run.
 
 ### Render failed (exit code)
 - CHECK: job error + `data/studio_runtime/logs/<job_id>.log` tail.

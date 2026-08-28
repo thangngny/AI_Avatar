@@ -65,4 +65,13 @@ Use at actual technology transfer. Recipient should be able to perform each item
 - [ ] 9. Create backup
 - [ ] 10. Identify where to look if a render fails (History error + per-job log)
 
+## V1.4.1 recovery proofs (recipient verifies recoverability)
+- [ ] Fresh-env rebuild drill (FULLY_REPRODUCIBLE — PROVEN_REAL)
+- [ ] Representative prepared-avatar restore + render (PROVEN_REAL)
+- [ ] DB backup + restore (PROVEN_REAL)
+- [ ] Startup job reconciliation (unit-tested: stale transient -> failed)
+- [ ] ffprobe fallback fixed (unit-tested: no fabrication)
+- [ ] Maintenance tool / Cleanup / Backup scheduler install understood
+- [ ] Disaster recovery quick card reviewed
+
 Any unchecked item that needs undocumented developer knowledge = HANDOVER GAP.

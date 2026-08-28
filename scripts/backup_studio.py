@@ -19,7 +19,28 @@ sys.path.insert(0, ROOT)
 from studio import config
 
 DEFAULT_DEST = r"D:\CongThang_AI_Avatar\backups"
-DEST = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DEST
+# DEST: first positional arg that isn't a flag/value. (V1.4.1 fix: --retain must
+# not be misread as the destination path.)
+def _dest():
+    skip_next = False
+    for a in sys.argv[1:]:
+        if skip_next:
+            skip_next = False; continue
+        if a == "--retain":
+            skip_next = True; continue
+        if a.startswith("-"):
+            continue
+        return a
+    return DEFAULT_DEST
+DEST = _dest()
+# Retention: keep the N most recent DB bundles (V1.4.1 §10). Default 14.
+def _retain_n():
+    for i, a in enumerate(sys.argv):
+        if a == "--retain" and i+1 < len(sys.argv):
+            try: return int(sys.argv[i+1])
+            except ValueError: pass
+    return 14
+RETAIN = _retain_n()
 
 def sha256_file(p):
     h = hashlib.sha256()
@@ -87,3 +108,20 @@ if report["errors"]:
 print(f"NOTE: bundle contains .env (SECRET) + studio.db. Store securely.")
 print(f"NOTE: 35GB prepared-avatar binaries + raw sources NOT included — back up")
 print(f"      data/avatars + data/input/avatar_sources separately (file copy).")
+
+# Retention: prune older DB bundles beyond RETAIN (V1.4.1 §10).
+import shutil as _sh
+try:
+    bundles = sorted([d for d in os.listdir(DEST) if d.startswith("studio_backup_")],
+                     key=lambda d: os.path.getmtime(os.path.join(DEST, d)))
+    pruned = 0
+    for old in bundles[:-RETAIN]:
+        oldp = os.path.join(DEST, old)
+        try:
+            _sh.rmtree(oldp, ignore_errors=True); pruned += 1
+        except OSError:
+            pass
+    if pruned:
+        print(f"Retention: kept last {RETAIN}, pruned {pruned} old bundle(s).")
+except Exception:
+    pass

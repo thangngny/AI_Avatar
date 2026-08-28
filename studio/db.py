@@ -215,6 +215,21 @@ def list_active_jobs() -> List[Dict[str, Any]]:
         conn.close()
 
 
+def list_jobs_in_statuses(statuses) -> List[Dict[str, Any]]:
+    """Jobs whose status is in the given tuple (V1.4.1 R06 reconciliation)."""
+    if not statuses:
+        return []
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            f"SELECT * FROM jobs WHERE status IN ({','.join('?'*len(statuses))}) ORDER BY created_at",
+            tuple(statuses),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
 # --------------------------------------------------------------------------- #
 # Avatars                                                                     #
 # --------------------------------------------------------------------------- #

@@ -9,9 +9,46 @@
 - `backup_report.json` — manifest of the bundle (paths, sha256, sizes).
 
 ## What is NOT backed up (back up separately)
-- `data/avatars/` (35 GB prepared avatar binaries) and `data/input/avatar_sources/` (raw videos) — file-copy these to D: periodically (see below). They are irreplaceable / expensive to reconstruct.
+- `data/avatars/` (35 GB prepared avatar binaries) and `data/input/avatar_sources/` (raw videos) — file-copy these to D: periodically using `scripts/backup_avatars.py` (see below). They are irreplaceable / expensive to reconstruct.
 - Render outputs on D: (regenerable).
 - Python env / models (reinstallable from requirements-handover.lock + MODEL_MANIFEST.md).
+
+## Prepared-Avatar backup (V1.4.1)
+`scripts/backup_avatars.py` copies prepared avatar folders (structure + images + mask + coords + latents) and writes a per-file SHA-256 manifest so a receiving engineer can verify completeness/corruption.
+```
+:: representative (fast):
+scripts\backup_avatars.py --avatars doTrang_closeup,mc_hamai_mid --dest D:\CongThang_AI_Avatar\backup_avatars
+:: all ~35 GB (slow; run when avatar set changes):
+scripts\backup_avatars.py --all --dest D:\CongThang_AI_Avatar\backup_avatars
+:: manifest only (no copy):
+scripts\backup_avatars.py --all --manifest-only --dest D:\...\backup_avatars
+```
+Output: `<dest>\<avatar_id>\…` + `avatar_manifest.json` (per-file size + sha256).
+
+## Prepared-Avatar restore (PROVEN_REAL drill, V1.4.1)
+1. Copy `<dest>\<avatar_id>` back to `data\avatars\<avatar_id>` (robocopy/copytree).
+2. Verify against `avatar_manifest.json` (recompute sha256 per file — 0 mismatches expected).
+3. Confirm recognized: `python -c "import sys;sys.path.insert(0,'.');from studio import avatar_service;print(avatar_service._check_ready(r'data\avatars\<id>'))"` → True.
+- Drill evidence (2026-08-28): doTrang_closeup + mc_hamai_mid restored to an isolated location, 1480 files, 0 checksum mismatches, both `_check_ready`=True; a short render from the restored copy produced a valid 1080×1920 25fps MP4. Production avatars untouched; test artifacts cleaned up. **REPRESENTATIVE_RESTORE_PROVEN. FULL_35GB_COPY_NOT_EXECUTED** (procedure above; run once before relying on it).
+
+## Backup retention (V1.4.1)
+`scripts/backup_studio.py --retain N` (default 14) prunes all but the N most recent DB bundles after each backup. DB bundles are tiny; 14 is plenty.
+
+## Optional scheduled backup (V1.4.1)
+`AI_Avatar_Studio_Setup_Backup.bat` (runs `scripts/setup_backup_schedule.py`):
+```
+:: install (daily 03:17 DB backup task):
+AI_Avatar_Studio_Setup_Backup.bat install
+:: verify:
+AI_Avatar_Studio_Setup_Backup.bat verify
+:: remove:
+AI_Avatar_Studio_Setup_Backup.bat remove
+```
+Explicit operator action only — never auto-registers on install. No secrets printed.
+
+## Frequency / retention (separated, V1.4.1)
+- **DB + .env + config**: before any risky change + at least weekly (tiny, fast). Retain last 14 daily bundles.
+- **Prepared avatars + raw sources (35 GB)**: when the avatar set changes or monthly. Retain last 2 monthly copies. These change rarely and are large — different cadence from DB.
 
 ## Backup command
 ```

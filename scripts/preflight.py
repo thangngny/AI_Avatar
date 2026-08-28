@@ -96,19 +96,33 @@ try:
 except Exception as e:
     block("GPU", f"nvidia-smi lỗi: {e}")
 
-# 6. FFmpeg / ffprobe
-ff = shutil.which("ffprobe") or shutil.which("ffmpeg")
+# 6. FFmpeg + ffprobe (V1.4.1 R15: ffprobe now required for honest verify)
 if shutil.which("ffmpeg"): ok("FFmpeg", shutil.which("ffmpeg"))
-elif ff: warn("FFmpeg", f"chỉ có {ff} — nên có ffmpeg trên PATH")
 else:
-    # fallback imageio-ffmpeg
     try:
         import imageio_ffmpeg
         ok("FFmpeg", f"imageio-ffmpeg bundled: {imageio_ffmpeg.get_ffmpeg_exe()}")
     except Exception:
-        block("FFmpeg", "không tìm thấy ffmpeg/ffprobe")
+        block("FFmpeg", "không tìm thấy ffmpeg trên PATH")
+try:
+    from studio import verify as _v
+    fp = _v.ffprobe_resolved()
+    if fp: ok("ffprobe", fp)
+    else: block("ffprobe", "không tìm thấy ffprobe — verify không thể kiểm tra stream. Cài ffprobe hoặc đặt FFPROBE_PATH")
+except Exception as e:
+    warn("ffprobe", f"không kiểm tra được: {e}")
 
-# 7. Disk space (renders drive + repo drive)
+# 7. RENDER STORAGE (V1.4.1 R04: configurable + validated)
+try:
+    rv = config.validate_renders_dir()
+    if rv["ok"]:
+        ok("Render storage", f"{rv['path']}  còn {rv['free_gb']} GB  (STUDIO_RENDERS_DIR={'set' if os.environ.get('STUDIO_RENDERS_DIR') else 'default'})")
+    else:
+        block("Render storage", f"{rv['path']} — " + "; ".join(rv["errors"]))
+except Exception as e:
+    block("Render storage", f"{config.RENDERS_DIR}: {e}")
+
+# 8. Repo disk (avatars/models live here)
 def free_gb(path):
     try:
         import ctypes
@@ -117,14 +131,7 @@ def free_gb(path):
         return free.value / 1e9
     except Exception:
         return None
-renders_free = free_gb(config.RENDERS_DIR) if have(os.path.dirname(config.RENDERS_DIR) or "D:\\") else None
 repo_free = free_gb(ROOT)
-if renders_free is not None and renders_free < 20:
-    block("Disk (renders)", f"{config.RENDERS_DIR} chỉ còn {renders_free:.1f} GB — quá thấp")
-elif renders_free is not None:
-    ok("Disk (renders)", f"{config.RENDERS_DIR}  còn {renders_free:.1f} GB")
-else:
-    warn("Disk (renders)", f"{config.RENDERS_DIR} không xác định được dung lượng")
 if repo_free is not None and repo_free < 15:
     warn("Disk (repo)", f"{ROOT} chỉ còn {repo_free:.1f} GB (avatars/models nằm đây)")
 elif repo_free is not None:

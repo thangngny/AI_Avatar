@@ -24,7 +24,10 @@ RAW_SOURCES_ROOT = os.path.join(ROOT, "data", "input", "avatar_sources")
 STUDIO_DIR = HERE
 RUNTIME_DIR = os.path.join(ROOT, "data", "studio_runtime")
 TEMP_DIR = os.path.join(RUNTIME_DIR, "temp")          # previews, temp audio
-RENDERS_DIR = r"D:\CongThang_AI_Avatar\renders"        # production render output
+# Render output directory. Overridable via STUDIO_RENDERS_DIR (V1.4.1 R04) so
+# the system is not hard-coupled to the D: drive on another machine. Default
+# preserves the exact current production path.
+RENDERS_DIR = os.environ.get("STUDIO_RENDERS_DIR", "").strip() or r"D:\CongThang_AI_Avatar\renders"
 DB_PATH = os.path.join(RUNTIME_DIR, "studio.db")
 LOG_DIR = os.path.join(RUNTIME_DIR, "logs")            # per-job technical logs
 
@@ -54,6 +57,46 @@ def ensure_runtime_dirs() -> None:
 
 def ensure_renders_dir() -> None:
     os.makedirs(RENDERS_DIR, exist_ok=True)
+
+
+def renders_dir_free_bytes() -> int:
+    """Free bytes on the drive holding RENDERS_DIR (Windows). 0 if unknown."""
+    try:
+        import ctypes
+        free = ctypes.c_ulonglong(0)
+        d = os.path.dirname(RENDERS_DIR) or RENDERS_DIR
+        ctypes.windll.kernel32.GetDiskFreeSpaceExW(d, None, None, ctypes.byref(free))
+        return free.value
+    except Exception:
+        return 0
+
+
+def validate_renders_dir() -> dict:
+    """Existence + writable + free-space check for the resolved render dir.
+    Returns {ok, path, exists, writable, free_gb, errors[]}."""
+    out = {"ok": False, "path": RENDERS_DIR, "exists": False, "writable": False,
+           "free_gb": None, "errors": []}
+    try:
+        os.makedirs(RENDERS_DIR, exist_ok=True)
+    except Exception as e:
+        out["errors"].append(f"cannot create renders dir: {e}")
+        return out
+    out["exists"] = True
+    try:
+        t = os.path.join(RENDERS_DIR, ".studio_write_probe")
+        with open(t, "w") as f:
+            f.write("ok")
+        os.remove(t)
+        out["writable"] = True
+    except Exception as e:
+        out["errors"].append(f"renders dir not writable: {e}")
+        return out
+    free = renders_dir_free_bytes()
+    out["free_gb"] = round(free / 1e9, 1) if free else 0.0
+    if free and free < 20 * (1 << 30):
+        out["errors"].append(f"renders drive low: {out['free_gb']} GB free (<20 GB)")
+    out["ok"] = out["writable"] and (not free or free >= 20 * (1 << 30))
+    return out
 
 
 def safe_avatar_id(name: str) -> str:

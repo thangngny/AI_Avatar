@@ -48,7 +48,9 @@ Close the Studio console window (the `run_studio.py` process). Running renders a
 - `TROUBLESHOOTING.md` — symptom → check → fix.
 - `BACKUP_RESTORE.md` — backup/restore.
 - `ROLLBACK_RUNBOOK.md` — return to a known-good release.
+- `DISASTER_RECOVERY_QUICK_CARD.md` — emergency one-liners.
 - Run `AI_Avatar_Studio_Preflight.bat` any time — it tells you what's wrong.
+- `AI_Avatar_Studio_Maintenance.bat` — one menu for preflight / backup / verify / cleanup.
 
 ## Golden rules
 - **Production truth is locked.** Never change MuseTalk/gain/ctx/offset/FPS/resolution (config/render_truth.json).

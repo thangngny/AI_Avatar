@@ -15,7 +15,27 @@ from . import config
 
 
 def _ffprobe(path: str) -> Optional[Dict[str, Any]]:
-    for exe in ("ffprobe", "ffprobe.exe"):
+    # Resolve a ffprobe executable (V1.4.1 R15 fix — the old fallback called
+    # imageio_ffmpeg.get_ffprobe_exe which does not exist). Resolution order:
+    #   1. ffprobe on PATH
+    #   2. FFPROBE_PATH env var
+    #   3. ffprobe next to imageio-ffmpeg's bundled ffmpeg
+    # If none is available, returns None — verify() then reports an honest
+    # failure instead of fabricating success from file size alone.
+    candidates = ["ffprobe", "ffprobe.exe"]
+    env_p = os.environ.get("FFPROBE_PATH", "").strip()
+    if env_p:
+        candidates.append(env_p)
+    try:
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        # imageio-ffmpeg ships ffmpeg; a sibling ffprobe may exist.
+        sib = os.path.join(os.path.dirname(ff), "ffprobe.exe")
+        if os.path.isfile(sib):
+            candidates.append(sib)
+    except Exception:
+        pass
+    for exe in candidates:
         try:
             r = subprocess.run(
                 [exe, "-v", "error", "-print_format", "json",
@@ -28,18 +48,31 @@ def _ffprobe(path: str) -> Optional[Dict[str, Any]]:
                 return json.loads(r.stdout)
             except Exception:
                 return None
-    # Fallback: imageio-ffmpeg's bundled ffprobe binary.
+    return None
+
+
+def ffprobe_resolved() -> Optional[str]:
+    """Return the ffprobe executable path that would be used, or None.
+    (V1.4.1 R15 — for preflight/reporting without running a probe.)"""
+    candidates = ["ffprobe", "ffprobe.exe"]
+    env_p = os.environ.get("FFPROBE_PATH", "").strip()
+    if env_p:
+        candidates.append(env_p)
     try:
         import imageio_ffmpeg
-        ff = imageio_ffmpeg.get_ffprobe_exe()  # type: ignore[attr-defined]
-        r = subprocess.run(
-            [ff, "-v", "error", "-print_format", "json",
-             "-show_format", "-show_streams", path],
-            capture_output=True, text=True, timeout=60)
-        if r.returncode == 0 and r.stdout:
-            return json.loads(r.stdout)
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        sib = os.path.join(os.path.dirname(ff), "ffprobe.exe")
+        if os.path.isfile(sib):
+            candidates.append(sib)
     except Exception:
         pass
+    import shutil as _sh
+    for exe in candidates:
+        if os.path.isfile(exe):
+            return exe
+        found = _sh.which(exe)
+        if found:
+            return found
     return None
 
 
@@ -75,9 +108,11 @@ def verify(output_path: str) -> Dict[str, Any]:
 
     data = _ffprobe(output_path)
     if not data:
-        result["warnings"].append("ffprobe unavailable — could not inspect streams.")
-        # File exists and is non-trivially sized; don't hard-fail without ffprobe.
-        result["ok"] = size > 1000
+        # V1.4.1 R15: do NOT fabricate a successful verification from file size
+        # alone when ffprobe is unavailable. Report an honest failure so the
+        # operator installs ffprobe rather than trusting an unverified output.
+        result["warnings"].append("ffprobe unavailable — cannot verify render output streams. Install ffprobe on PATH or set FFPROBE_PATH.")
+        result["ok"] = False
         return result
 
     streams = data.get("streams", [])

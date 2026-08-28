@@ -52,3 +52,6 @@ Reproducible lock: `requirements-handover.lock` (production subset).
 4. Run `tests/test_studio.py` + one short real render + compare output.
 5. Roll back if lipsync truth or output changes.
 Never `pip install -U` the production env blindly — torch/CUDA upgrades can silently change render output.
+
+## Fresh-environment reproducibility (V1.4.1 — PROVEN_REAL)
+A clean venv was created from **system Python 3.10** (NOT a copy of `latentsync_env` site-packages) and populated from `requirements-handover.lock` + the cu121 wheel index only. Result: **FULLY_REPRODUCIBLE** — torch 2.5.1+cu121 / CUDA 12.1 / 2 GPU visible, all production imports OK, and a real locked render produced a valid 1080×1920 25fps MP4 with `render_truth.json` hash **identical** to the existing environment (`a5a0e55f…`). ElevenLabs client imports + config + voice/check work (no quota used). Fresh env kept at `D:\CongThang_AI_Avatar\handover_rebuild_test\venv` as a validated candidate standalone environment (migration is a separate explicit decision — not done here).

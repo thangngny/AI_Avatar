@@ -46,6 +46,20 @@ Tạo AI Avatar mới → sample → requirements → upload → quality check �
 2. Close the Studio console window.
 3. If sharing: run Stop Sharing first.
 
+## After a PC restart / crash (V1.4.1)
+1. `AI_Avatar_Studio_Preflight.bat` → confirm SẴN SÀNG.
+2. `AI_Avatar_Studio.bat`.
+3. **Lịch sử render** — any job that was running when power was lost now shows "failed" with "Studio đã khởi động lại trong khi job đang chạy." (V1.4.1 auto-reconciliation on startup). Click **Thử lại** if you still want it. Completed jobs are untouched.
+4. If you were sharing, re-run `AI_Avatar_Studio_Share.bat` (new link).
+5. Check Trạng thái hệ thống = SẴN SÀNG.
+
+## Maintenance tool (V1.4.1)
+`AI_Avatar_Studio_Maintenance.bat` — one menu:
+1 Preflight · 2 Backup Database · 3 Verify Database · 4 Verify Models · 5 Check Disk · 6 Clean Old Logs (confirm) · 7 Clean Stale Uploads (confirm) · 8 Verify Prepared Avatars · 9 Show Backup Status · 10 Exit. Destructive cleanup asks confirmation. Also: `AI_Avatar_Studio_Cleanup.bat` (dry-run by default).
+
+## Render storage (V1.4.1)
+Renders go to `STUDIO_RENDERS_DIR` (default `D:\CongThang_AI_Avatar\renders`). To relocate (e.g. another machine), set `STUDIO_RENDERS_DIR=<path>` before starting Studio. Preflight shows the resolved path + free space + writability.
+
 ## Backup (do before any risky change)
 `scripts/backup_studio.ps1` → bundle under `D:\CongThang_AI_Avatar\backups\` (DB via SQLite online backup API + .env + render_truth.json + lineage manifest). See BACKUP_RESTORE.md. The 35 GB avatar binaries are NOT in the bundle — back up `data\avatars` separately.
 
