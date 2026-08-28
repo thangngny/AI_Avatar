@@ -60,10 +60,11 @@
     <main class="content" id="content"><!-- views injected here --></main>
   </div>
 
-  <footer class="queue-bar" id="queueBar">
-    <div class="queue-label">HÀNG ĐỢI RENDER</div>
+  <footer class="queue-bar" id="queueBar" onclick="toggleQueueDrawer()" title="Xem hàng đợi render">
+    <div class="queue-label">HÀNG ĐỢI RENDER <span class="qchev" id="qChev">▴</span></div>
     <div class="queue-items" id="queueItems"><span class="muted">Đang nghỉ</span></div>
   </footer>
+  <div class="queue-drawer" id="queueDrawer" hidden></div>
 </div>
 
 <script src="/app.js"></script>

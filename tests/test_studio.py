@@ -363,6 +363,32 @@ class TestVerify(StudioTestCase):
         self.assertFalse(r["ok"])
 
 
+class TestAnalyzeMetadata(StudioTestCase):
+    """V1.3.1 §9 regression: the validator spreads integrity fields (width/
+    height/duration) at the TOP LEVEL of its success JSON, with no nested
+    "integrity" key. analyze_source must normalize so the UI never sees
+    undefined x undefined. Runs the real validator subprocess (torch env)."""
+    def test_integrity_populated_on_real_source(self):
+        import studio.avatar_service as svc
+        sample = os.path.join(ROOT, "studio", "static", "assets",
+                              "avatar_source_example", "sample.mp4")
+        if not os.path.isfile(sample):
+            self.skipTest("sample.mp4 not present")
+        r = svc.analyze_source(sample)
+        if r.get("technical_failure"):
+            self.skipTest(f"validator unavailable: {r.get('error')}")
+        integ = r.get("integrity") or {}
+        for k in ("width", "height", "duration"):
+            v = integ.get(k)
+            self.assertIsNotNone(v, f"integrity.{k} must not be None (got {integ})")
+            self.assertNotEqual(v, "", f"integrity.{k} must not be empty")
+            self.assertNotIn(str(v), ("undefined", "NaN", "null", "[object Object]"),
+                             f"integrity.{k} must not render as undefined/NaN/null")
+        # The bug shape: integrity == {} on success. Explicitly forbidden.
+        self.assertTrue(integ.get("width") and integ.get("height"),
+                        f"integrity must be a complete dict, got {integ}")
+
+
 class TestOutputUniqueness(StudioTestCase):
     def test_many_same_second_paths_are_unique(self):
         """Defect 1 regression: many jobs created in the same wall-clock second

@@ -324,7 +324,19 @@ def analyze_source(video_path: str) -> Dict[str, Any]:
                 "overall": "FAIL", "error": raw["error"],
                 "warnings": [], "categories": [], "raw": raw}
 
-    integrity = raw.get("integrity", {})
+    # The validator spreads integrity fields (width/height/fps/duration/frames)
+    # at the TOP LEVEL of its success JSON — it only nests an "integrity" key on
+    # the early FAIL path. Normalize so callers always get a complete dict and
+    # the UI never shows undefined×undefined (spec V1.3.1 §9).
+    raw_integ = raw.get("integrity") or {}
+    integrity = {
+        "width": raw_integ.get("width", raw.get("width")),
+        "height": raw_integ.get("height", raw.get("height")),
+        "fps": raw_integ.get("fps", raw.get("fps")),
+        "duration": raw_integ.get("duration", raw.get("duration")),
+        "frames": raw_integ.get("frames", raw.get("frames")),
+        "status": raw_integ.get("status", "PASS"),
+    }
     cats = raw.get("categories", {})
     if not cats:
         # No face detected -> technical failure (can't prepare a lip-sync avatar).

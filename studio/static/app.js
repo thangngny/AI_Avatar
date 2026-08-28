@@ -20,6 +20,18 @@ const fmtDur = (sec) => {
   const m = Math.floor(sec / 60), s = sec % 60;
   return `${m}m ${s}s`;
 };
+// Defensive video-metadata formatter (spec V1.3.1 §9). Never returns
+// undefined/NaN/null/[object Object] — only real values, joined, or ''.
+const num = (v) => (v === null || v === undefined || v === "" || (typeof v === "number" && Number.isNaN(v))) ? null : v;
+function fmtVideoMeta(integrity) {
+  const i = integrity || {};
+  const w = num(i.width), h = num(i.height), dur = num(i.duration);
+  const parts = [];
+  if (w && h) parts.push(`${w} × ${h}`);
+  if (dur) parts.push(`${fmtDur(dur)}`);
+  return parts.join(" · ");
+}
+const isLocalhost = () => ["127.0.0.1", "localhost", "::1"].includes(location.hostname);
 const toast = (msg, kind = "") => {
   const t = document.createElement("div");
   t.className = `toast ${kind}`;
@@ -91,6 +103,8 @@ const state = {
   // TTS provider: "elevenlabs" (production) | "edge" (free test). Explicit,
   // never silently switched. Edge path consumes NO ElevenLabs quota.
   ttsProvider: "elevenlabs", edgeVoices: [], edgeVoice: "vi-VN-HoaiMyNeural",
+  // Wizard state (V1.3.1): current + furthest-reached step for each flow.
+  quickStep: 1, quickMax: 1, createStep: 1, createMax: 1, activeJobs: [],
 };
 
 // Standardized Vietnamese mouth-motion diagnostic script (spec B10). A
@@ -187,76 +201,93 @@ async function renderQuick() {
   el.innerHTML = `
     <h1 class="view-title">Tạo video từ Avatar có sẵn</h1>
     <p class="view-sub">Làm theo 5 bước — mỗi bước một việc.</p>
-    <div class="steps">
+    ${quickStepperHTML()}
+    <div class="steps wizard">
 
-      <div class="step">
-        <div class="step-head"><div class="step-num">1</div><div class="step-title">Chọn Avatar</div></div>
-        <div class="avatar-select">
-          <select id="qAvatar"></select>
-          <button class="ghost" onclick="switchView('create')">＋ Thêm Avatar mới</button>
-        </div>
-        <div id="qAvatarPick"></div>
-      </div>
-
-      <div class="step">
-        <div class="step-head"><div class="step-num">2</div><div class="step-title">Nhập nội dung</div></div>
-        <textarea id="qScript" rows="6" placeholder="Nhập hoặc dán nội dung bạn muốn Avatar nói…"></textarea>
-        <div id="qScriptInfo" class="muted" style="margin-top:8px;font-size:12px"></div>
-        <details class="tech" style="margin-top:12px">
-          <summary>Nhập từ file / chọn độ dài video</summary>
-          <div style="margin-top:10px">
-            <label>Tải lên file .docx hoặc .txt</label>
-            <input type="file" id="qFile" accept=".txt,.docx" />
-            ${state.scriptText ? `<button class="tiny ghost" style="margin-top:8px" onclick="clearScript()">Xóa nội dung</button>` : ""}
+      <div class="step" data-step="1">
+        <div class="step-head" onclick="quickGoto(1)"><div class="step-num">1</div><div class="step-title">Chọn Avatar</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div class="avatar-select">
+            <select id="qAvatar"></select>
+            <button class="ghost" onclick="switchView('create')">＋ Thêm Avatar mới</button>
           </div>
-          <div style="margin-top:12px">
-            <label>Độ dài video</label>
-            <select id="qSplit">
-              <option value="full">Toàn bộ kịch bản</option>
-              <option value="30s">30 giây đầu</option>
-              <option value="1min">1 phút đầu</option>
-              <option value="3min">3 phút đầu</option>
-              <option value="auto">Tự động chia phần (giữ nguyên câu)</option>
-            </select>
-            <div id="qSegPreview"></div>
-          </div>
-        </details>
-      </div>
-
-      <div class="step">
-        <div class="step-head"><div class="step-num">3</div><div class="step-title">Chọn giọng</div></div>
-        <div class="tts-tabs" id="ttsTabs">
-          <button class="tts-tab ${state.ttsProvider === 'elevenlabs' ? 'active' : ''}" data-p="elevenlabs">ELEVENLABS<span class="tt-sub">Giọng chất lượng cao</span></button>
-          <button class="tts-tab ${state.ttsProvider === 'edge' ? 'active' : ''}" data-p="edge">TEST MIỄN PHÍ<span class="tt-sub">Edge TTS — dùng để kiểm tra</span></button>
+          <div id="qAvatarPick"></div>
+          <div class="actions"><button class="primary" id="qNext1" onclick="quickGoto(2)">Tiếp tục</button></div>
         </div>
-        <div class="tts-subnote" id="ttsSubnote"></div>
-        <div id="ttsPanel"></div>
-        <audio id="qPreview" style="display:none;margin-top:10px;width:100%" controls></audio>
       </div>
 
-      <div class="step">
-        <div class="step-head"><div class="step-num">4</div><div class="step-title">Kiểm tra</div></div>
-        <div class="hint" style="margin-bottom:12px">Render đoạn ngắn để kiểm tra chuyển động miệng trước khi tạo video đầy đủ.</div>
-        <div class="row">
-          <button class="secondary" id="qMouthBtn" onclick="renderMouthTest()">TEST KHẨU HÌNH (MIỄN PHÍ)</button>
-          <button class="ghost" id="qTestBtn" onclick="renderTest10s()">Kiểm tra 10 giây</button>
+      <div class="step" data-step="2">
+        <div class="step-head" onclick="quickGoto(2)"><div class="step-num">2</div><div class="step-title">Nội dung</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <textarea id="qScript" rows="6" placeholder="Nhập hoặc dán nội dung bạn muốn Avatar nói…"></textarea>
+          <div id="qScriptInfo" class="muted" style="margin-top:8px;font-size:12px"></div>
+          <details class="tech" style="margin-top:12px">
+            <summary>Nhập từ file / chọn độ dài video</summary>
+            <div style="margin-top:10px">
+              <label>Tải lên file .docx hoặc .txt</label>
+              <input type="file" id="qFile" accept=".txt,.docx" />
+              ${state.scriptText ? `<button class="tiny ghost" style="margin-top:8px" onclick="clearScript()">Xóa nội dung</button>` : ""}
+            </div>
+            <div style="margin-top:12px">
+              <label>Độ dài video</label>
+              <select id="qSplit">
+                <option value="full">Toàn bộ kịch bản</option>
+                <option value="30s">30 giây đầu</option>
+                <option value="1min">1 phút đầu</option>
+                <option value="3min">3 phút đầu</option>
+                <option value="auto">Tự động chia phần (giữ nguyên câu)</option>
+              </select>
+              <div id="qSegPreview"></div>
+            </div>
+          </details>
+          <div class="actions"><button class="ghost" onclick="quickGoto(1)">Quay lại</button><button class="primary" id="qNext2" onclick="quickGoto(3)">Tiếp tục</button></div>
         </div>
-        <details class="tech" style="margin-top:12px">
-          <summary>Đoạn test chuẩn</summary>
-          <div style="margin-top:10px">
-            <textarea id="qMouthScript" rows="2">${esc(STANDARD_MOUTH_TEST_SCRIPT)}</textarea>
-            <div class="actions"><button class="tiny ghost" onclick="useStandardMouthScript()">Dùng đoạn test chuẩn</button></div>
-            <div class="hint" style="margin-top:6px">Giọng test miễn phí chỉ dùng để kiểm tra chuyển động miệng. Khi render bản chính thức, hãy chuyển sang ElevenLabs.</div>
-          </div>
-        </details>
       </div>
 
-      <div class="step">
-        <div class="step-head"><div class="step-num">5</div><div class="step-title">Tạo video</div></div>
-        <div class="hint" style="margin-bottom:12px">Khi đã hài lòng với bước kiểm tra, tạo video hoàn chỉnh.</div>
-        <div class="actions">
-          <button class="primary big" id="qRenderBtn" onclick="renderFull()">TẠO VIDEO</button>
-          <span class="muted" style="font-size:11px;align-self:center">Ctrl+Enter = tạo video</span>
+      <div class="step" data-step="3">
+        <div class="step-head" onclick="quickGoto(3)"><div class="step-num">3</div><div class="step-title">Giọng</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div class="tts-tabs" id="ttsTabs">
+            <button class="tts-tab ${state.ttsProvider === 'elevenlabs' ? 'active' : ''}" data-p="elevenlabs">ELEVENLABS<span class="tt-sub">Giọng chất lượng cao</span></button>
+            <button class="tts-tab ${state.ttsProvider === 'edge' ? 'active' : ''}" data-p="edge">TEST MIỄN PHÍ<span class="tt-sub">Edge TTS — dùng để kiểm tra</span></button>
+          </div>
+          <div class="tts-subnote" id="ttsSubnote"></div>
+          <div id="ttsPanel"></div>
+          <audio id="qPreview" style="display:none;margin-top:10px;width:100%" controls></audio>
+          <div class="actions"><button class="ghost" onclick="quickGoto(2)">Quay lại</button><button class="primary" id="qNext3" onclick="quickGoto(4)">Tiếp tục</button></div>
+        </div>
+      </div>
+
+      <div class="step" data-step="4">
+        <div class="step-head" onclick="quickGoto(4)"><div class="step-num">4</div><div class="step-title">Kiểm tra</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div class="hint" style="margin-bottom:12px">Render đoạn ngắn để kiểm tra chuyển động miệng trước khi tạo video đầy đủ. Bước này tùy chọn.</div>
+          <div class="row">
+            <button class="secondary" id="qMouthBtn" onclick="renderMouthTest()">TEST KHẨU HÌNH (MIỄN PHÍ)</button>
+            <button class="ghost" id="qTestBtn" onclick="renderTest10s()">Kiểm tra 10 giây</button>
+          </div>
+          <details class="tech" style="margin-top:12px">
+            <summary>Đoạn test chuẩn</summary>
+            <div style="margin-top:10px">
+              <textarea id="qMouthScript" rows="2">${esc(STANDARD_MOUTH_TEST_SCRIPT)}</textarea>
+              <div class="actions"><button class="tiny ghost" onclick="useStandardMouthScript()">Dùng đoạn test chuẩn</button></div>
+              <div class="hint" style="margin-top:6px">Giọng test miễn phí chỉ dùng để kiểm tra chuyển động miệng. Khi render bản chính thức, hãy chuyển sang ElevenLabs.</div>
+            </div>
+          </details>
+          <div class="actions"><button class="ghost" onclick="quickGoto(3)">Quay lại</button><button class="primary" onclick="quickGoto(5)">Bỏ qua, tạo video</button></div>
+        </div>
+      </div>
+
+      <div class="step" data-step="5">
+        <div class="step-head" onclick="quickGoto(5)"><div class="step-num">5</div><div class="step-title">Tạo video</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div id="qReview" class="review-grid"></div>
+          <div class="hint" style="margin-bottom:12px">Khi đã hài lòng với bước kiểm tra, tạo video hoàn chỉnh.</div>
+          <div class="actions">
+            <button class="ghost" onclick="quickGoto(4)">Quay lại</button>
+            <button class="primary big" id="qRenderBtn" onclick="renderFull()">TẠO VIDEO</button>
+            <span class="muted" style="font-size:11px;align-self:center">Ctrl+Enter = tạo video</span>
+          </div>
         </div>
       </div>
 
@@ -283,17 +314,19 @@ async function renderQuick() {
     const a = state.avatars.find(x => x.avatar_id === sel.value);
     state.selectedAvatar = a; ls.set("studio_avatar", sel.value);
     renderAvatarPick(a);
+    quickRefresh();
   };
   const lastAid = ls.get("studio_avatar", "");
   if (lastAid && readyAvs.some(a => a.avatar_id === lastAid)) { sel.value = lastAid; sel.onchange(); }
   else if (state.selectedAvatar && readyAvs.some(a => a.avatar_id === state.selectedAvatar.avatar_id)) { sel.value = state.selectedAvatar.avatar_id; sel.onchange(); }
   $("#qScript").value = state.scriptText;
-  $("#qScript").oninput = (e) => { state.scriptText = e.target.value; updateScriptInfo(); };
+  $("#qScript").oninput = (e) => { state.scriptText = e.target.value; updateScriptInfo(); quickRefresh(); };
   // TTS provider tabs (explicit, never silent switch).
   $$("#ttsTabs .tts-tab").forEach(t => t.onclick = () => {
     state.ttsProvider = t.dataset.p;
     $$("#ttsTabs .tts-tab").forEach(x => x.classList.toggle("active", x === t));
     renderTTSPanel();
+    quickRefresh();
   });
   renderTTSPanel();
   $("#qSplit").value = state.splitMode;
@@ -310,6 +343,71 @@ async function renderQuick() {
     } else toast(d.error || "Không đọc được kịch bản", "bad");
   };
   updateScriptInfo(); updateSegPreview();
+  quickRefresh();
+}
+// ----- Create Video wizard helpers -----
+const QUICK_STEPS = [
+  { n: 1, title: "Avatar" }, { n: 2, title: "Nội dung" }, { n: 3, title: "Giọng" },
+  { n: 4, title: "Kiểm tra" }, { n: 5, title: "Tạo video" },
+];
+function quickStepperHTML() {
+  return `<div class="stepper">${QUICK_STEPS.map((s, i) => `
+    <div class="stp" data-step="${s.n}"><div class="s-dot">${s.n}</div><div class="s-lbl">${s.title}</div></div>
+    ${i < QUICK_STEPS.length - 1 ? '<div class="s-conn"></div>' : ''}`).join("")}</div>`;
+}
+function quickVoiceReady() {
+  if (state.ttsProvider === "edge") return true; // edge voice always selected
+  return !!(state.voiceId && state.voiceId.trim());
+}
+function quickSummary(n) {
+  if (n === 1) return state.selectedAvatar ? esc(state.selectedAvatar.avatar_id) : "Chưa chọn";
+  if (n === 2) { const w = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0; return w ? `${w} từ` : "Chưa nhập"; }
+  if (n === 3) return state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId ? "ElevenLabs" : "Chưa chọn giọng");
+  if (n === 4) return "Tùy chọn";
+  return "";
+}
+// Re-render summaries/stepper/disabled state without rebuilding the whole view
+// (so textarea content, selections, and focus are preserved).
+function quickRefresh() {
+  const cur = state.quickStep;
+  $$('.steps.wizard .step').forEach(st => {
+    const n = +st.dataset.step;
+    st.classList.toggle('is-active', n === cur);
+    st.classList.toggle('is-done', n < cur);
+    st.classList.toggle('is-future', n > cur);
+    const sum = st.querySelector('.step-summary');
+    if (sum) sum.textContent = n < cur ? quickSummary(n) : "";
+  });
+  // stepper nodes
+  $$('.stepper .stp').forEach(s => {
+    const n = +s.dataset.step;
+    s.classList.toggle('done', n < cur);
+    s.classList.toggle('active', n === cur);
+  });
+  // Tiếp tục gating
+  const set = (id, ok) => { const b = document.getElementById(id); if (b) b.disabled = !ok; };
+  set('qNext1', !!state.selectedAvatar);
+  set('qNext2', !!state.scriptText.trim());
+  set('qNext3', quickVoiceReady());
+  // review summary on step 5
+  const rev = document.getElementById('qReview');
+  if (rev) {
+    const av = state.selectedAvatar ? state.selectedAvatar.avatar_id : "—";
+    const words = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0;
+    const voice = state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId || "—");
+    rev.innerHTML = `<div class="rv"><span class="rv-k">Avatar</span><span class="rv-v">${esc(av)}</span></div>
+      <div class="rv"><span class="rv-k">Nội dung</span><span class="rv-v">${words} từ</span></div>
+      <div class="rv"><span class="rv-k">Giọng</span><span class="rv-v">${esc(voice)}</span></div>`;
+  }
+}
+function quickGoto(n) {
+  if (n < 1 || n > 5) return;
+  state.quickStep = n;
+  state.quickMax = Math.max(state.quickMax, n);
+  quickRefresh();
+  const st = document.querySelector(`.steps.wizard .step[data-step="${n}"]`);
+  if (st) st.scrollIntoView({ block: "start", behavior: "smooth" });
+  $("#content").scrollTop = 0;
 }
 
 function renderTTSPanel() {
@@ -402,7 +500,9 @@ function renderAvatarPick(a) {
 }
 function clearScript() {
   state.scriptText = ""; state.scriptInfo = null;
-  renderQuick();
+  const ta = $("#qScript"); if (ta) ta.value = "";
+  updateScriptInfo();
+  quickRefresh();
 }
 async function updateSegPreview() {
   const box = $("#qSegPreview"); if (!box) return;
@@ -513,80 +613,105 @@ async function renderCreate() {
   const el = $("#content");
   el.innerHTML = `
     <h1 class="view-title">Tạo AI Avatar mới</h1>
-    <p class="view-sub">Upload video của một người — hệ thống tự động kiểm tra và tạo Avatar.</p>
-    <div class="steps">
+    <p class="view-sub">Tải video của một người — hệ thống tự động kiểm tra và tạo Avatar.</p>
+    ${createStepperHTML()}
+    <div class="steps wizard">
 
-      <div class="step">
-        <div class="step-head"><div class="step-num">1</div><div class="step-title">Video mẫu</div></div>
-        <div id="cSample"></div>
+      <div class="step" data-step="1">
+        <div class="step-head" onclick="createGoto(1)"><div class="step-num">1</div><div class="step-title">Video mẫu</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div id="cSample"></div>
+          <div class="actions"><button class="primary" onclick="createGoto(2)">Tiếp tục</button></div>
+        </div>
       </div>
 
-      <div class="step">
-        <div class="step-head"><div class="step-num">2</div><div class="step-title">Yêu cầu video</div></div>
-        <div class="req-grid">
-          ${REQS.map(r => `<div class="req-item">${r.ic}<div class="ri-label">${r.label}</div><div class="ri-sub">${r.sub}</div></div>`).join("")}
-        </div>
-        <details class="tech" style="margin-top:14px">
-          <summary>Xem hướng dẫn chi tiết</summary>
-          <div class="guide-detail" style="display:block">
-            <div class="guide-cols">
-              <div class="guide-col should">
-                <h3>NÊN</h3>
-                <ul>
-                  <li>Quay từ ngực/vai trở lên</li>
-                  <li>Khuôn mặt đủ lớn trong khung hình</li>
-                  <li>Nhìn gần thẳng vào camera</li>
-                  <li>Miệng ở trạng thái tự nhiên, nghỉ</li>
-                  <li>Không nói trong video nguồn</li>
-                  <li>Nhìn thấy đầy đủ môi và cằm</li>
-                  <li>Camera cố định</li>
-                  <li>Ánh sáng ổn định</li>
-                  <li>Chớp mắt và thở tự nhiên</li>
-                  <li>Chỉ chuyển động đầu/vai rất nhẹ</li>
-                </ul>
-              </div>
-              <div class="guide-col avoid">
-                <h3>TRÁNH</h3>
-                <ul>
-                  <li>Đứng quá xa camera</li>
-                  <li>Nói liên tục</li>
-                  <li>Quay nghiêng quá nhiều</li>
-                  <li>Che môi hoặc cằm</li>
-                  <li>Camera rung</li>
-                  <li>Di chuyển cơ thể mạnh</li>
-                  <li>Ánh sáng thay đổi liên tục</li>
-                  <li>Motion blur</li>
-                  <li>File bị nén mạnh</li>
-                </ul>
-              </div>
-            </div>
-            <div class="framing-diagram">
-              <div style="text-align:center">
-                <div class="framing-box good"><div class="head"></div><div class="shoulders"></div></div>
-                <div class="framing-label">NÊN: đầu + vai</div>
-              </div>
-              <div style="text-align:center">
-                <div class="framing-box bad"><div class="stick-head"></div><div class="stick"></div></div>
-                <div class="framing-label">TRÁNH: xa, mặt nhỏ</div>
-              </div>
-            </div>
+      <div class="step" data-step="2">
+        <div class="step-head" onclick="createGoto(2)"><div class="step-num">2</div><div class="step-title">Yêu cầu</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div class="req-grid">
+            ${REQS.map(r => `<div class="req-item">${r.ic}<div class="ri-label">${r.label}</div><div class="ri-sub">${r.sub}</div></div>`).join("")}
           </div>
-        </details>
-      </div>
-
-      <div class="step">
-        <div class="step-head"><div class="step-num">3</div><div class="step-title">Upload video</div></div>
-        <div class="dropzone" id="cDrop">
-          <div class="big">${ICO.upload}</div>
-          <div>Kéo thả video vào đây hoặc bấm để chọn<br><span class="muted2">.mp4 .mov .avi .mkv .webm — tự động kiểm tra khi tải lên</span></div>
-          <input type="file" id="cFile" accept="video/*,.mp4,.mov,.avi,.mkv,.webm" hidden />
+          <details class="tech" style="margin-top:14px">
+            <summary>Xem hướng dẫn chi tiết</summary>
+            <div class="guide-detail" style="display:block">
+              <div class="guide-cols">
+                <div class="guide-col should">
+                  <h3>NÊN</h3>
+                  <ul>
+                    <li>Quay từ ngực/vai trở lên</li>
+                    <li>Khuôn mặt đủ lớn trong khung hình</li>
+                    <li>Nhìn gần thẳng vào camera</li>
+                    <li>Miệng ở trạng thái tự nhiên, nghỉ</li>
+                    <li>Không nói trong video nguồn</li>
+                    <li>Nhìn thấy đầy đủ môi và cằm</li>
+                    <li>Camera cố định</li>
+                    <li>Ánh sáng ổn định</li>
+                    <li>Chớp mắt và thở tự nhiên</li>
+                    <li>Chỉ chuyển động đầu/vai rất nhẹ</li>
+                  </ul>
+                </div>
+                <div class="guide-col avoid">
+                  <h3>TRÁNH</h3>
+                  <ul>
+                    <li>Đứng quá xa camera</li>
+                    <li>Nói liên tục</li>
+                    <li>Quay nghiêng quá nhiều</li>
+                    <li>Che môi hoặc cằm</li>
+                    <li>Camera rung</li>
+                    <li>Di chuyển cơ thể mạnh</li>
+                    <li>Ánh sáng thay đổi liên tục</li>
+                    <li>Motion blur</li>
+                    <li>File bị nén mạnh</li>
+                  </ul>
+                </div>
+              </div>
+              <div class="framing-diagram">
+                <div style="text-align:center">
+                  <div class="framing-box good"><div class="head"></div><div class="shoulders"></div></div>
+                  <div class="framing-label">NÊN: đầu + vai</div>
+                </div>
+                <div style="text-align:center">
+                  <div class="framing-box bad"><div class="stick-head"></div><div class="stick"></div></div>
+                  <div class="framing-label">TRÁNH: xa, mặt nhỏ</div>
+                </div>
+              </div>
+            </div>
+          </details>
+          <div class="actions"><button class="ghost" onclick="createGoto(1)">Quay lại</button><button class="primary" onclick="createGoto(3)">Tiếp tục</button></div>
         </div>
-        <div id="cFileLabel" class="muted" style="margin-top:8px;font-size:12px"></div>
       </div>
 
-      <div id="cQuality"></div>
-      <div id="cMouth"></div>
-      <div id="cPrepare"></div>
+      <div class="step" data-step="3">
+        <div class="step-head" onclick="createGoto(3)"><div class="step-num">3</div><div class="step-title">Tải video lên</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div class="dropzone" id="cDrop">
+            <div class="dz-icon">${ICO.upload}</div>
+            <div class="dz-main">Kéo thả video vào đây</div>
+            <div class="muted2" style="margin:4px 0 10px">hoặc</div>
+            <span class="dz-btn">CHỌN VIDEO</span>
+            <div class="dz-formats">MP4 / MOV / AVI / MKV / WEBM</div>
+            <div class="hint" style="margin-top:10px">Video sẽ được kiểm tra trước khi tạo Avatar.</div>
+            <input type="file" id="cFile" accept="video/*,.mp4,.mov,.avi,.mkv,.webm" hidden />
+          </div>
+          <div id="cFileLabel" class="muted" style="margin-top:8px;font-size:12px"></div>
+        </div>
+      </div>
+
+      <div class="step" data-step="4">
+        <div class="step-head" onclick="createGoto(4)"><div class="step-num">4</div><div class="step-title">Kiểm tra video</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div id="cQuality"></div>
+          <div id="cMouth"></div>
+        </div>
+      </div>
+
+      <div class="step" data-step="5">
+        <div class="step-head" onclick="createGoto(5)"><div class="step-num">5</div><div class="step-title">Tạo Avatar</div><div class="step-summary"></div></div>
+        <div class="step-body">
+          <div id="cPrepare"></div>
+        </div>
+      </div>
+
     </div>`;
   renderSampleSlot();
   const dz = $("#cDrop");
@@ -596,36 +721,85 @@ async function renderCreate() {
   dz.ondrop = (e) => { e.preventDefault(); dz.classList.remove("drag"); if (e.dataTransfer.files[0]) handleCreateFile(e.dataTransfer.files[0]); };
   $("#cFile").onchange = (e) => { if (e.target.files[0]) handleCreateFile(e.target.files[0]); };
   if (createState.prepAvatarId) pollPrep();
+  createRefresh();
+}
+// ----- Create Avatar wizard helpers -----
+const CREATE_STEPS = [
+  { n: 1, title: "Video mẫu" }, { n: 2, title: "Yêu cầu" }, { n: 3, title: "Upload" },
+  { n: 4, title: "Kiểm tra" }, { n: 5, title: "Tạo Avatar" },
+];
+function createStepperHTML() {
+  return `<div class="stepper">${CREATE_STEPS.map((s, i) => `
+    <div class="stp" data-step="${s.n}"><div class="s-dot">${s.n}</div><div class="s-lbl">${s.title}</div></div>
+    ${i < CREATE_STEPS.length - 1 ? '<div class="s-conn"></div>' : ''}`).join("")}</div>`;
+}
+function createSummary(n) {
+  if (n === 3) return createState.fileName ? esc(createState.fileName) : "Chưa tải lên";
+  if (n === 4) return createState.quality ? (createState.quality.overall || "Đã kiểm tra") : "Chưa kiểm tra";
+  return "";
+}
+function createRefresh() {
+  const cur = state.createStep;
+  $$('.steps.wizard .step').forEach(st => {
+    const n = +st.dataset.step;
+    st.classList.toggle('is-active', n === cur);
+    st.classList.toggle('is-done', n < cur);
+    st.classList.toggle('is-future', n > cur);
+    const sum = st.querySelector('.step-summary');
+    if (sum) sum.textContent = n < cur ? createSummary(n) : "";
+  });
+  $$('.stepper .stp').forEach(s => {
+    const n = +s.dataset.step;
+    s.classList.toggle('done', n < cur);
+    s.classList.toggle('active', n === cur);
+  });
+}
+function createGoto(n) {
+  if (n < 1 || n > 5) return;
+  state.createStep = n;
+  state.createMax = Math.max(state.createMax, n);
+  createRefresh();
+  const st = document.querySelector(`.steps.wizard .step[data-step="${n}"]`);
+  if (st) st.scrollIntoView({ block: "start", behavior: "smooth" });
+  $("#content").scrollTop = 0;
 }
 async function renderSampleSlot() {
   const box = $("#cSample"); if (!box) return;
   box.innerHTML = `<div class="muted">Đang kiểm tra…</div>`;
   const r = await api("/api/avatar/sample");
   if (r.available) {
-    const checks = (r.checks && r.checks.length ? r.checks : [
-      "Mặt đủ lớn", "Gần chính diện", "Không nói", "Cằm đầy đủ", "Camera cố định", "Chuyển động nhẹ"
-    ]).map(c => `<div class="sample-check">✓ ${esc(c)}</div>`).join("");
-    const caveats = (r.caveats && r.caveats.length)
-      ? `<div class="sample-caveats">${r.caveats.map(c => `<div class="sample-caveat">⚠ ${esc(c)}</div>`).join("")}</div>`
+    // Human-readable summary for the PRIMARY view (spec V1.3.1 §5) — no raw
+    // metrics. The raw manifest checks/caveats (with face_h_ratio, Laplacian,
+    // SOURCE_MOUTH_STATE, …) are evidence: preserved verbatim under a collapsed
+    // "Thông tin kỹ thuật" section, never shown on the primary cognitive path.
+    const humanChecks = [
+      "Khuôn mặt đủ lớn", "Gần chính diện", "Nhìn rõ môi và cằm", "Camera tương đối ổn định",
+    ].map(c => `<div class="sample-check">✓ ${esc(c)}</div>`).join("");
+    const title = r.temporary ? "Video mẫu tạm thời" : "Video mẫu đúng chuẩn";
+    const caveatNote = r.temporary
+      ? `<div class="sample-caveat">⚠ Đây là video tham khảo tạm thời — sẽ thay bằng nguồn chuẩn khi sẵn sàng.</div>
+         <div class="sample-caveat">⚠ Khi quay nguồn mới, hãy giữ miệng tự nhiên và không nói.</div>`
       : "";
-    if (r.temporary) {
-      // Honest TEMPORARY label — best existing raw source, NOT a perfect
-      // standard source. Operator explicitly accepted this (V1.1.6).
-      box.innerHTML = `<div class="card sample-card sample-temporary">
-        <h2>Video mẫu tạm thời</h2>
-        <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
-        <div class="sample-temporary-note">${esc(r.why_eligible || "Mẫu tạm thời — nguồn raw tốt nhất hiện có trên disk.")}</div>
-        <div class="sample-checks">${checks}</div>
-        ${caveats}
-      </div>`;
-    } else {
-      box.innerHTML = `<div class="card sample-card">
-        <h2>Video mẫu đúng chuẩn</h2>
-        <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
-        <div class="sample-checks">${checks}</div>
-        ${caveats}
-      </div>`;
-    }
+    // Raw evidence (verbatim from manifest) — collapsed by default.
+    const rawChecks = (r.checks || []).map(c => `<div class="kv"><span class="k">✓</span><span class="v">${esc(c)}</span></div>`).join("");
+    const rawCaveats = (r.caveats || []).map(c => `<div class="kv"><span class="k">⚠</span><span class="v">${esc(c)}</span></div>`).join("");
+    const enc = (r.encoding || {});
+    const encBlock = enc.resolution ? `<div class="kv"><span class="k">Thông tin video</span><span class="v">${esc(enc.resolution)} · ${enc.fps} FPS · ${enc.duration_sec} giây</span></div>` : "";
+    box.innerHTML = `<div class="card sample-card ${r.temporary ? 'sample-temporary' : ''}">
+      <h2>${esc(title)}</h2>
+      <video class="sample-video" src="${esc(r.url)}" muted loop playsinline controls></video>
+      <div class="sample-section-t">Điểm nên tham khảo</div>
+      <div class="sample-checks">${humanChecks}</div>
+      ${caveatNote ? `<div class="sample-section-t warn">Cần lưu ý</div><div class="sample-caveats">${caveatNote}</div>` : ""}
+      <details class="tech" style="margin-top:14px">
+        <summary>Thông tin kỹ thuật</summary>
+        <div style="margin-top:10px">
+          ${rawChecks ? `<div class="adv-sub">Đánh giá từ video mẫu</div>${rawChecks}` : ""}
+          ${rawCaveats ? `<div class="adv-sub" style="margin-top:8px">Cảnh báo kỹ thuật</div>${rawCaveats}` : ""}
+          ${encBlock}
+        </div>
+      </details>
+    </div>`;
   } else {
     // Honest pending state — no fabricated real-person sample (spec A7/H).
     box.innerHTML = `<div class="sample-pending">
@@ -693,22 +867,28 @@ async function handleCreateFile(f) {
   const r = await fetch("/api/avatar/analyze", { method: "POST",
     headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: done.path }) });
   const d = await r.json().catch(() => ({}));
-  $("#cFileLabel").innerHTML = `${esc(f.name)} · ${d.integrity ? d.integrity.width + "×" + d.integrity.height + " · " + d.integrity.duration + " giây" : ""}`;
+  createState.fileName = f.name;
+  // Defensive metadata (spec V1.3.1 §9): never render undefined/NaN/null.
+  const meta = fmtVideoMeta(d.integrity);
+  $("#cFileLabel").innerHTML = `${esc(f.name)}${meta ? " · " + meta : ""}`;
   if (d.technical_failure) {
-    createState = { videoPath: null, quality: null, override: false, prepAvatarId: null };
-    $("#cQuality").innerHTML = `<div class="step"><div class="step-head"><div class="step-num">4</div><div class="step-title">Kiểm tra video</div></div>
-      <div class="bad-box">${esc(d.error || "Không xử lý được video này.")}</div>
-      <div class="qhint">Đây là lỗi kỹ thuật, không phải cảnh báo chất lượng — không thể dùng video này.</div></div>`;
+    createState = { videoPath: null, quality: null, override: false, prepAvatarId: null,
+      mouthStateUser: null, mouthStateAuto: null, mouthStateProvenance: "UNKNOWN", fileName: f.name };
+    $("#cQuality").innerHTML = `<div class="bad-box">${esc(d.error || "Không xử lý được video này.")}</div>
+      <div class="qhint">Đây là lỗi kỹ thuật, không phải cảnh báo chất lượng — không thể dùng video này.</div>
+      <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button></div>`;
+    createGoto(4);
     return;
   }
   createState.videoPath = d.video_path;
   createState.quality = d;
   renderQuality(d);
+  createGoto(4);
 }
 function renderQuality(d) {
   const catLabel = {
-    VIDEO_INTEGRITY: "Tính toàn vẹn", FACE_SIZE: "Kích thước khuôn mặt",
-    FACE_SHARPNESS: "Độ nét khuôn mặt", FRONTALNESS: "Góc mặt",
+    VIDEO_INTEGRITY: "Tính toàn vẹn", FACE_SIZE: "Khuôn mặt đủ lớn",
+    FACE_SHARPNESS: "Độ nét", FRONTALNESS: "Góc mặt",
     MOUTH_VISIBILITY: "Miệng nhìn rõ", CHIN_VISIBILITY: "Cằm / hàm",
     SOURCE_MOUTH_STATE: "Trạng thái miệng", MOTION: "Chuyển động",
     LIGHTING: "Ánh sáng",
@@ -717,32 +897,35 @@ function renderQuality(d) {
     s === "WARN" ? `<span class="cr-ic warn">⚠</span>` :
     s === "FAIL" ? `<span class="cr-ic fail">✗</span>` :
     `<span class="cr-ic na">—</span>`;
-  // Simplified overall result first (progressive disclosure: details collapsed).
-  const overallCls = d.overall === "PASS" ? "tot" : d.overall === "WARN" ? "warn" : "fail";
-  const overallTxt = d.overall === "PASS" ? "✓ TỐT — video phù hợp để tạo Avatar." :
-    d.overall === "WARN" ? "⚠ Cần lưu ý — dùng được, chất lượng khẩu hình có thể thấp hơn." :
-    "✗ Không khuyến nghị — chất lượng thấp; vẫn có thể dùng nếu cần.";
-  const rows = (d.categories || []).map(c =>
+  // Explain, not just judge (spec V1.3.1 §10). Overall status as a short title,
+  // a reassurance line, then 2-4 human-readable strengths and warnings up front.
+  // Per-dimension rows live behind "Xem chi tiết" (progressive disclosure).
+  const cls = d.overall === "PASS" ? "tot" : d.overall === "WARN" ? "warn" : "fail";
+  const title = d.overall === "PASS" ? "TỐT" : d.overall === "WARN" ? "CẦN LƯU Ý" : "KHÔNG KHUYẾN NGHỊ";
+  const reassurance = d.overall === "PASS" ? "Video phù hợp để tạo Avatar."
+    : "Video vẫn có thể sử dụng.";
+  const cats = d.categories || [];
+  const passCats = cats.filter(c => c.status === "PASS");
+  const warnCats = cats.filter(c => c.status === "WARN" || c.status === "FAIL");
+  const strengths = passCats.slice(0, 4).map(c => `<div class="qs good">✓ ${esc(catLabel[c.category] || c.category)}</div>`).join("");
+  const warns = warnCats.slice(0, 4).map(c => `<div class="qs warn">⚠ ${esc(catLabel[c.category] || c.category)}</div>`).join("");
+  const rows = cats.map(c =>
     `<div class="compare-row">${ic(c.status)}<span class="cr-label">${esc(catLabel[c.category] || c.category)}</span><span class="cr-val">${esc(c.message || "")}</span></div>`).join("");
-  const strengths = (d.categories || []).filter(c => c.status === "PASS").map(c => `✓ ${esc(catLabel[c.category] || c.category)}`).join("  ");
-  const warns = (d.categories || []).filter(c => c.status !== "PASS").map(c => `⚠ ${esc(catLabel[c.category] || c.category)}`).join("  ");
-  $("#cQuality").innerHTML = `<div class="step">
-    <div class="step-head"><div class="step-num">4</div><div class="step-title">Kiểm tra video</div></div>
-    <div class="overall-result ${overallCls}">${overallTxt}</div>
-    <details class="tech" style="margin-top:10px">
-      <summary>Chi tiết từng mục</summary>
+  $("#cQuality").innerHTML = `
+    <div class="overall-result ${cls}"><span class="or-title">${title}</span><span class="or-sub">${reassurance}</span></div>
+    ${strengths ? `<div class="qsection-t good" style="margin-top:12px">Điểm tốt</div>${strengths}` : ""}
+    ${warns ? `<div class="qsection-t warn" style="margin-top:10px">Cần lưu ý</div>${warns}` : ""}
+    <details class="tech" style="margin-top:14px">
+      <summary>Xem chi tiết</summary>
       <div style="margin-top:10px">${rows}
-      ${strengths ? `<div class="compare-explain"><b>Điểm tốt:</b> ${strengths}</div>` : ""}
-      ${warns ? `<div class="compare-explain"><b>Điểm cần lưu ý:</b> ${warns}</div>` : ""}
-      ${d.overall !== "PASS" ? `<div class="qhint">Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này.</div>` : ""}</div>
-    </details>
-  </div>`;
+      ${d.overall !== "PASS" ? `<div class="qhint" style="margin-top:10px">Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này.</div>` : ""}</div>
+    </details>`;
   if (d.overall !== "PASS") createState.override = true;
-  // Mouth-state manual confirmation (spec A10/A11). V1.1.4 proved the automatic
-  // talking_proxy cannot reliably separate talking vs neutral in the normal
-  // range, so the user confirms explicitly. Raw automated evidence is stored
-  // separately and never overwritten.
-  const mouthCat = (d.categories || []).find(c => c.category === "SOURCE_MOUTH_STATE");
+  // Mouth-state manual confirmation (spec A10/A11). The automatic detector cannot
+  // reliably separate talking vs neutral in the normal range, so the user
+  // confirms explicitly. Raw automated evidence is stored separately and never
+  // overwritten. (talking_proxy is an internal detail — never shown to users.)
+  const mouthCat = cats.find(c => c.category === "SOURCE_MOUTH_STATE");
   const autoStatus = mouthCat ? mouthCat.status : "UNKNOWN";
   const autoValue = mouthCat ? (mouthCat.value != null ? mouthCat.value : mouthCat.note) : null;
   createState.mouthStateAuto = (autoValue != null ? String(autoValue) : null);
@@ -750,27 +933,28 @@ function renderQuality(d) {
 }
 function renderMouthConfirm(autoStatus) {
   const box = $("#cMouth"); if (!box) return;
-  // If auto already PASSed (neutral mouth), no need to ask.
+  // Mouth-state is a sub-question of the quality check (step 4). Labeled
+  // clearly (spec V1.3.1 §11); talking_proxy is never mentioned to users.
   if (autoStatus === "PASS") {
+    // Auto-detected neutral mouth — no need to ask.
     createState.mouthStateUser = "NOT_TALKING";
     createState.mouthStateProvenance = "AUTO";
-    box.innerHTML = `<div class="step"><div class="step-head"><div class="step-num">5</div><div class="step-title">Tạo Avatar</div></div>
+    box.innerHTML = `<div class="sub-card">
+      <div class="sub-title">Xác nhận trạng thái miệng</div>
       <div class="compare-row"><span class="cr-ic pass">✓</span>
       <span class="cr-val">Miệng trung tính trong video nguồn — phù hợp.</span></div>
       <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
       <button class="primary" onclick="showPrepare()">Tiếp tục</button></div></div>`;
     return;
   }
-  // UNKNOWN or WARN/FAIL (talking detected) -> ask the user. If auto already
-  // flagged talking, pre-select "Có nói" but still allow correction.
   const preTalk = (autoStatus === "WARN" || autoStatus === "FAIL");
   if (preTalk) createState.mouthStateUser = "TALKING";
   createState.mouthStateProvenance = preTalk ? "AUTO" : "UNKNOWN";
   const r = (val, label) => `<label class="mouth-opt"><input type="radio" name="mouth" value="${val}" ${createState.mouthStateUser === val ? 'checked' : ''} onchange="onMouthPick('${val}')"/> ${label}</label>`;
-  box.innerHTML = `<div class="step mouth-confirm-card">
-    <div class="step-head"><div class="step-num">5</div><div class="step-title">Tạo Avatar</div></div>
-    <div class="hint">Hệ thống chưa xác định chắc chắn nhân vật có đang nói hay không.</div>
-    <div class="qhint" style="margin:8px 0">Video này:</div>
+  box.innerHTML = `<div class="sub-card mouth-confirm-card">
+    <div class="sub-title">Xác nhận trạng thái miệng</div>
+    <div class="hint" style="margin-bottom:8px">Hệ thống chưa thể xác định chắc chắn nội dung này.</div>
+    <div class="qhint" style="margin:4px 0 8px">Video này:</div>
     <div class="mouth-opts">
       ${r("NOT_TALKING", "Không nói")}
       ${r("TALKING", "Có nói")}
@@ -785,8 +969,7 @@ function onMouthPick(val) {
   createState.mouthStateProvenance = "USER_CONFIRMED";
   const res = $("#cMouthResult"); if (!res) return;
   if (val === "TALKING") {
-    // A11: talking warning, overridable.
-    res.innerHTML = `<div class="bad-box" style="margin-top:10px">⚠ NHÂN VẬT ĐANG NÓI TRONG VIDEO NGUỒN<br>
+    res.innerHTML = `<div class="warn-box" style="margin-top:10px">⚠ Nhân vật đang nói trong video nguồn<br>
       <span class="muted2" style="font-size:12px">Video vẫn có thể sử dụng, nhưng nguồn không nói thường phù hợp hơn để tạo AI Avatar ổn định.</span></div>
       <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
       <button class="primary" onclick="showPrepare()">Vẫn sử dụng video này</button></div>`;
@@ -795,7 +978,12 @@ function onMouthPick(val) {
     <button class="primary" onclick="showPrepare()">Tiếp tục</button></div>`;
   }
 }
-function resetCreate() { createState = { videoPath: null, quality: null, override: false, prepAvatarId: null, mouthStateUser: null, mouthStateAuto: null, mouthStateProvenance: "UNKNOWN" }; renderCreate(); }
+function resetCreate() {
+  createState = { videoPath: null, quality: null, override: false, prepAvatarId: null,
+    mouthStateUser: null, mouthStateAuto: null, mouthStateProvenance: "UNKNOWN", fileName: null };
+  state.createStep = 1; state.createMax = 1;
+  renderCreate();
+}
 function showPrepare() {
   const d = createState.quality || {};
   $("#cPrepare").innerHTML = `<div class="card">
@@ -807,6 +995,7 @@ function showPrepare() {
     </div>
     <div id="cPrepProgress"></div>
   </div>`;
+  createGoto(5);
 }
 async function prepareAvatar() {
   const name = $("#cName").value.trim();
@@ -947,13 +1136,20 @@ function libraryCardHTML(a, recommended, recKind) {
     : `<button class="primary" disabled title="Chưa hoàn tất">Chọn Avatar</button>`;
   const detailBtn = a.ready ? `<button class="ghost" onclick="showQualityDetail('${esc(a.avatar_id)}')">Xem chi tiết</button>`
     : `<button class="ghost" onclick="showIncompleteDetail('${esc(a.avatar_id)}')">Xem chi tiết</button>`;
+  // Name hierarchy (spec V1.3.1 §13): show a display name as primary when one
+  // exists that differs from the technical ID; otherwise keep the ID honestly.
+  // Never fabricate names.
+  const dispName = (a.name && a.name !== a.avatar_id) ? a.name : "";
+  const nameHTML = dispName
+    ? `<div class="ac-name">${esc(dispName)}</div><div class="ac-id">${esc(a.avatar_id)}</div>`
+    : `<div class="ac-name">${esc(a.avatar_id)}</div>`;
   return `<div class="avatar-card ${a.ready ? "" : "incomplete"}">
     <div class="ac-thumb">
       <img src="/api/avatars/${esc(a.avatar_id)}/thumbnail" onerror="this.style.opacity=.25" />
       ${rec}
     </div>
     <div class="ac-body">
-      <div class="ac-name">${esc(a.avatar_id)}</div>
+      ${nameHTML}
       <div class="ac-sub">${esc(TYPE_VI[a.avatar_type] || a.avatar_type || "Không rõ")}</div>
       <div class="ac-tags">${statusBadge} ${qBadge}</div>
       <div class="ac-note">${esc(note)}</div>
@@ -1016,34 +1212,43 @@ function renderQualityModal(aid, q) {
   const pstrengths = (pq.strengths || []).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
   const pwarns = (pq.warnings || []).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
   const preparedSection = pq.dimensions && pq.dimensions.length ? `
-    <div class="qsection"><div class="qsection-t ${pqm.cls}">B. Chất lượng avatar đã chuẩn bị — ${esc(pqm.short || pq.prepared_status)}</div>
+    <div class="qsection"><div class="qsection-t ${pqm.cls}">B. AVATAR ĐÃ CHUẨN BỊ — ${esc(pqm.short || pq.prepared_status)}</div>
       <div class="hint">Phân tích từ dữ liệu đã chuẩn bị (full_imgs, coords, mask) — KHÔNG phải chất lượng video nguồn.</div>
-      <div class="dims">${pdims}</div>
       ${pstrengths ? `<div class="qsection-t good" style="margin-top:8px">Điểm tốt</div>${pstrengths}` : ""}
       ${pwarns ? `<div class="qsection-t warn" style="margin-top:8px">Điểm cần lưu ý</div>${pwarns}` : ""}
     </div>` : "";
   // --- Section C: production confidence ---
   const rh = q.render_history || {};
   const prod = PROD_VI[q.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
-  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">C. Độ tin cậy production (từ render thực tế) — ${esc(prod.short)}</div>
+  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">C. PRODUCTION — ${esc(prod.short)}</div>
     <div class="hint">${q.production_confidence === "CHƯA KIỂM CHỨNG" ? "Chưa có render thực tế nào được ghi nhận." : `Đã có ${rh.total||0} render hoàn tất (DB: ${rh.db_complete||0}, file: ${rh.external||0}).`}</div></div>`;
-  const dimsBlock = dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn (video nguồn gốc không còn).</div>`;
-  const advanced = (q.face_h_ratio != null || (q.dimensions || []).some(d => d.value != null)) ? `
-    <details class="advanced"><summary>Thông tin kỹ thuật</summary>
-      ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio (nguồn)</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
-      ${(pq.dimensions || []).filter(d => d.value != null && typeof d.value !== 'object').map(d => `<div class="kv"><span class="k">${esc(d.key)}</span><span class="v">${esc(d.value)}</span></div>`).join("")}
-    </details>` : "";
+  // Per-dimension rows + technical metrics live behind "Xem đánh giá chi tiết"
+  // (spec V1.3.1 §14: summary-first, dimensions in expanded detail area).
+  const detailBlock = `
+    <details class="tech" style="margin-top:14px">
+      <summary>Xem đánh giá chi tiết</summary>
+      <div style="margin-top:10px">
+        <div class="adv-sub">A. Video nguồn</div>
+        ${dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn (video nguồn gốc không còn).</div>`}
+        ${pq.dimensions && pq.dimensions.length ? `<div class="adv-sub" style="margin-top:10px">B. Avatar đã chuẩn bị</div><div class="dims">${pdims}</div>` : ""}
+        ${(q.face_h_ratio != null || (q.dimensions || []).some(d => d.value != null)) ? `
+        <details class="advanced" style="margin-top:10px"><summary>Thông tin kỹ thuật</summary>
+          ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio (nguồn)</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
+          ${(pq.dimensions || []).filter(d => d.value != null && typeof d.value !== 'object').map(d => `<div class="kv"><span class="k">${esc(d.key)}</span><span class="v">${esc(d.value)}</span></div>`).join("")}
+        </details>` : ""}
+      </div>
+    </details>`;
   modal(`<h2>${esc(aid)}</h2>
-    <div class="dim-overall">A. Chất lượng video nguồn: <span class="tag ${qm.cls}">${esc(qm.short || q.quality_status)}</span></div>
-    <div class="hint">Nguồn đánh giá: ${prov}</div>
-    <div class="hint">${esc(q.recommendation || "")}</div>
+    <div class="summary-blocks">
+      <div class="qsection"><div class="qsection-t ${qm.cls}">A. VIDEO NGUỒN — ${esc(qm.short || q.quality_status)}</div>
+        <div class="hint">Nguồn đánh giá: ${prov}</div></div>
+      ${preparedSection}
+      ${prodSection}
+    </div>
     ${videoInfo}
-    ${dimsBlock}
-    <div class="qsection"><div class="qsection-t good">Điểm tốt (nguồn)</div>${strengths || `<div class="muted">—</div>`}</div>
-    <div class="qsection"><div class="qsection-t warn">Điểm cần lưu ý (nguồn)</div>${warns || `<div class="muted">—</div>`}</div>
-    ${preparedSection}
-    ${prodSection}
-    ${advanced}
+    ${strengths ? `<div class="qsection-t good" style="margin-top:12px">Điểm tốt</div>${strengths}` : ""}
+    ${warns ? `<div class="qsection-t warn" style="margin-top:10px">Cần lưu ý</div>${warns}` : ""}
+    ${detailBlock}
     <div class="actions">
       <button class="primary" onclick="useAvatarFromModal('${esc(aid)}')">Chọn Avatar</button>
       <button class="ghost" onclick="closeModal()">Đóng</button>
@@ -1102,7 +1307,10 @@ function jobCardHTML(j) {
     ? `<video class="jthumb" src="/api/render/jobs/${j.job_id}/preview" muted preload="metadata" playsinline></video>`
     : `<div class="jthumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:20px">${j.status === "failed" ? "✗" : j.status === "timed_out" ? "⏱" : "—"}</div>`;
   let actions = "";
-  if (j.status === "complete") actions = `<button class="ghost tiny" onclick="openFolder('${j.job_id}')">Mở thư mục</button>`;
+  // "Mở thư mục" opens a folder on the HOST machine — only meaningful on
+  // localhost. For a remote collaborator (Cloudflare tunnel from another PC)
+  // it would do nothing useful, so hide it there (spec V1.3.1 §16).
+  if (j.status === "complete" && isLocalhost()) actions = `<button class="ghost tiny" onclick="openFolder('${j.job_id}')">Mở thư mục</button>`;
   else if (["failed","cancelled","timed_out"].includes(j.status)) actions = `<button class="ghost tiny" onclick="retryJob('${j.job_id}')">Thử lại</button>`;
   else if (j.status !== "complete") actions = `<button class="danger tiny" onclick="cancelJob('${j.job_id}')">Hủy</button>`;
   // Provider + test/production badge (spec Part D / E). Edge voice shows its
@@ -1280,16 +1488,50 @@ async function refreshQueue() {
   const r = await api("/api/system/status");
   if (r && r.active_jobs !== undefined) { state.status = r; renderTopbar(); }
   const active = (r && r.active_jobs) || [];
+  state.activeJobs = active;
   const bar = $("#queueItems"); if (!bar) return;
-  if (!active.length) { bar.innerHTML = `<span class="muted">Đang nghỉ</span>`; return; }
-  bar.innerHTML = active.map(j => {
-    const ic = j.status === "rendering" ? "▶" : j.status === "complete" ? "✓" : "○";
-    const lbl = QUEUE_LABEL[j.status] || statusLabel(j.stage || j.status);
-    return `<div class="qitem">${ic} ${esc(j.script_name || j.kind)} · ${esc(j.avatar_id)}
-      <div class="qbar"><div style="width:${j.progress || 0}%"></div></div>
-      <span class="muted">${esc(lbl)}</span></div>`;
-  }).join("");
+  if (!active.length) { bar.innerHTML = `<span class="muted">Đang nghỉ</span>`; }
+  else {
+    bar.innerHTML = active.map(j => {
+      const ic = j.status === "rendering" ? "▶" : j.status === "complete" ? "✓" : "○";
+      const lbl = QUEUE_LABEL[j.status] || statusLabel(j.stage || j.status);
+      return `<div class="qitem">${ic} ${esc(j.script_name || j.kind)} · ${esc(j.avatar_id)}
+        <div class="qbar"><div style="width:${j.progress || 0}%"></div></div>
+        <span class="muted">${esc(lbl)}</span></div>`;
+    }).join("");
+  }
+  const ch = $("#qChev"); if (ch) ch.textContent = active.length ? `▲ ${active.length} đang chạy` : "▲";
+  if ($("#queueDrawer") && !$("#queueDrawer").hidden) renderQueueDrawer();
   if (state.view === "history") refreshJobs();
+}
+// Queue drawer (spec V1.3.1 §18): clicking the footer queue bar opens a compact
+// panel. Idle → "Không có video đang render." Active → Avatar / job name / state /
+// progress (real data only; progress only if the backend already reports it).
+function toggleQueueDrawer() {
+  const d = $("#queueDrawer"); if (!d) return;
+  d.hidden = !d.hidden;
+  if (!d.hidden) renderQueueDrawer();
+}
+function renderQueueDrawer() {
+  const d = $("#queueDrawer"); if (!d) return;
+  const active = state.activeJobs || [];
+  const item = (j) => {
+    const lbl = QUEUE_LABEL[j.status] || statusLabel(j.stage || j.status);
+    const prog = (j.progress != null) ? `<div class="qd-prog"><div style="width:${j.progress}%"></div></div>` : "";
+    return `<div class="qd-item">
+      <div class="qd-name">${esc(j.script_name || j.kind || "Video")}</div>
+      <div class="qd-sub">Avatar: ${esc(j.avatar_id || "—")}</div>
+      <div class="qd-state">${esc(lbl)}</div>
+      ${prog}
+    </div>`;
+  };
+  d.innerHTML = `<div class="qd-head">
+    <b>HÀNG ĐỢI RENDER</b>
+    <button class="ghost tiny" onclick="toggleQueueDrawer()">Đóng</button>
+  </div>
+  <div class="qd-body">${active.length
+    ? active.map(item).join("")
+    : `<div class="qd-idle">Không có video đang render.</div>`}</div>`;
 }
 
 (async function init() {
