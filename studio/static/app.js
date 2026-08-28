@@ -440,7 +440,13 @@ function renderTTSPanel() {
       <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>`;
     const v = $("#qVoice"); if (v) {
       v.value = state.voiceId;
-      v.oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; ls.set("studio_voiceId", e.target.value); };
+      // Re-evaluate wizard gating on every keystroke so #qNext3 (Tiếp tục)
+      // enables as soon as a Voice ID is present — mirroring #qScript.oninput /
+      // #qAvatar.onchange. Without this, the Voice step's "Tiếp tục" stays
+      // disabled after typing a Voice ID and requires a step-header re-click.
+      // Gating stays truthful: quickVoiceReady() still requires a non-empty
+      // state.voiceId for ElevenLabs; empty/invalid stays disabled.
+      v.oninput = (e) => { state.voiceId = e.target.value; state.voiceChecked = false; state.voiceMeta = null; ls.set("studio_voiceId", e.target.value); quickRefresh(); };
     }
   }
 }
