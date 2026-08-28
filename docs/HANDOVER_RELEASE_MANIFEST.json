@@ -1,0 +1,63 @@
+{
+  "handover_date": "2026-08-28",
+  "head_before": "598ee7f",
+  "head_after": "(this commit) — identified by git tag ai-avatar-studio-ui-v1.4.0",
+  "git_tag": "ai-avatar-studio-ui-v1.4.0",
+  "previous_stable_tag": "ai-avatar-studio-ui-v1.3.1",
+  "studio_version": "AI Avatar Studio V1.4.0",
+  "production_renderer": "generate_video_from_script.py",
+  "production_pipeline": "musetalk_v15",
+  "production_truth": {
+    "audio_gain": 1.5,
+    "audio_context_left": 0,
+    "audio_feature_offset_frames": -3,
+    "fps": 25,
+    "resolution": "1080x1920",
+    "cuda_graph": true,
+    "long_audio_wola": true,
+    "feature_coverage_assertion": true
+  },
+  "environment": {
+    "os": "Windows 11 Pro 10.0.26200",
+    "python": "3.10.11",
+    "torch": "2.5.1+cu121",
+    "cuda": "12.1",
+    "gpus": ["NVIDIA GeForce RTX 3090", "NVIDIA GeForce RTX 3090"],
+    "gpu_driver": "610.88",
+    "ffmpeg": "9.0",
+    "cloudflared": "2026.8.2"
+  },
+  "references": {
+    "model_manifest": "docs/MODEL_MANIFEST.md + diagnostics/handover/model_manifest.json",
+    "dependency_inventory": "docs/DEPENDENCY_INVENTORY.md + requirements-handover.lock + diagnostics/handover/pip_freeze_torch.txt",
+    "risk_register": "docs/HANDOVER_RISK_REGISTER.md + diagnostics/handover_risk_register.json",
+    "system_map": "docs/HANDOVER_SYSTEM_MAP.md",
+    "asset_inventory": "docs/HANDOVER_ASSET_INVENTORY.md",
+    "baseline": "docs/HANDOVER_BASELINE.md",
+    "failure_injection": "docs/FAILURE_INJECTION_MATRIX.md",
+    "rollback": "docs/ROLLBACK_RUNBOOK.md",
+    "backup_restore": "docs/BACKUP_RESTORE.md",
+    "operations": "docs/OPERATIONS_RUNBOOK.md",
+    "troubleshooting": "docs/TROUBLESHOOTING.md",
+    "start_here": "docs/START_HERE.md",
+    "handover_checklist": "docs/HANDOVER_CHECKLIST.md",
+    "customer_source": "docs/CUSTOMER_SOURCE_ACCEPTANCE_CHECKLIST.md",
+    "output_quality": "docs/OUTPUT_QUALITY_CHECKLIST.md"
+  },
+  "tooling": {
+    "preflight": "AI_Avatar_Studio_Preflight.bat + scripts/preflight.py",
+    "backup": "scripts/backup_studio.ps1 + scripts/backup_studio.py",
+    "system_status": "system_status.py"
+  },
+  "database_backup_reference": "D:\\CongThang_AI_Avatar\\backups\\studio_backup_20260828_120741 (PROVEN_REAL restore drill)",
+  "handover_status": "READY_WITH_ACCEPTED_RISKS",
+  "open_risks_count": 8,
+  "critical_risks_count": 0,
+  "accepted_risks_summary": [
+    "R01 Cloudflare Quick Tunnel link-only full access (trusted only; migrate to Named Tunnel + Access for untrusted)",
+    "R02 Automated mouth-state detector unreliable (manual confirmation retained)",
+    "R10 Prepared avatars 35GB on C: (file-backup separately)",
+    "R20 Good source != perfect output (final manual review required)"
+  ],
+  "secrets_included": "NONE — no API keys, tokens, or customer data in this manifest"
+}
