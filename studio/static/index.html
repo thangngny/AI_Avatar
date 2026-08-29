@@ -18,6 +18,9 @@
       <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 3 2 12h3v8h5v-6h4v6h5v-8h3z"/></svg>
       <span>Trang chủ</span>
     </button>
+    <button class="theme-toggle" id="themeToggle" title="Chuyển đổi giao diện Sáng / Tối" onclick="toggleTheme()">
+      <span id="themeIcon">🌙</span> <span id="themeLabel" style="font-size:12px;margin-left:4px;font-weight:600">TỐI</span>
+    </button>
     <div class="status-pill" id="globalStatus">
       <span class="dot" id="statusDot"></span>
       <span id="statusText">ĐANG KIỂM TRA…</span>
@@ -44,6 +47,10 @@
       <button class="nav-item" data-view="history">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 8v5l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
         <span>Lịch sử render</span>
+      </button>
+      <button class="nav-item" data-view="trash">
+        <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Thùng rác</span>
       </button>
 
       <div class="nav-section">HỆ THỐNG</div>

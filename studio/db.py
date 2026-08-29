@@ -84,6 +84,34 @@ def init_db() -> None:
                     updated_at  REAL NOT NULL
                 );
 
+                -- V1.6.0 — language-aware config identity. The same voice can need a
+                -- different config per language. Keyed by (voice_id, language_code,
+                -- resolver_policy). The legacy voice_configs (voice_id PK) table is
+                -- preserved for backward compatibility (V1.5.0 data is NOT destroyed).
+                CREATE TABLE IF NOT EXISTS voice_language_configs (
+                    voice_id        TEXT NOT NULL,
+                    language_code   TEXT NOT NULL,
+                    resolver_policy TEXT NOT NULL,
+                    config          TEXT NOT NULL,    -- JSON: resolved TTS config (no key)
+                    updated_at      REAL NOT NULL,
+                    PRIMARY KEY (voice_id, language_code, resolver_policy)
+                );
+
+                -- V1.6.0 — generic human-approved voice/language model preference.
+                -- Stores a benchmark-approved model for a SPECIFIC (voice, language)
+                -- pair — never a global "language -> model" hardcode. Any future
+                -- voice/language pair can use the same mechanism.
+                CREATE TABLE IF NOT EXISTS voice_model_profiles (
+                    voice_id           TEXT NOT NULL,
+                    language_code      TEXT NOT NULL,
+                    preferred_model_id TEXT NOT NULL,
+                    selection_source   TEXT NOT NULL,   -- HUMAN_BENCHMARK_APPROVED | USER_MANUAL | ...
+                    output_format      TEXT,            -- optional requested output format
+                    notes              TEXT,
+                    approved_at         REAL NOT NULL,
+                    PRIMARY KEY (voice_id, language_code)
+                );
+
                 CREATE TABLE IF NOT EXISTS avatars (
                     avatar_id    TEXT PRIMARY KEY,
                     name         TEXT,
@@ -94,7 +122,39 @@ def init_db() -> None:
                     quality_data TEXT,                  -- JSON
                     source_video TEXT,
                     created_at   REAL,
-                    updated_at   REAL
+                    updated_at   REAL,
+                    is_deleted   INTEGER DEFAULT 0,
+                    deleted_at   REAL
+                );
+
+                CREATE TABLE IF NOT EXISTS activity_logs (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at    REAL NOT NULL,
+                    action        TEXT NOT NULL,        -- 'AVATAR_RENAME' | 'AVATAR_DELETE' | 'AVATAR_RESTORE' | 'RENDER_DELETE' | 'RENDER_RESTORE' | 'JOB_CANCEL' | 'JOB_STOP' | 'JOB_RETRY' | 'SCRIPT_PREVIEW_CREATED' | 'RENDER_USED_SCRIPT_PREVIEW'
+                    resource_type TEXT NOT NULL,        -- 'avatar' | 'job' | 'render' | 'audio_preview'
+                    resource_id   TEXT NOT NULL,
+                    details       TEXT,                 -- JSON, sanitized (no API keys)
+                    result        TEXT NOT NULL         -- 'SUCCESS' | 'CONFLICT' | 'ERROR'
+                );
+
+                CREATE TABLE IF NOT EXISTS audio_previews (
+                    id                 TEXT PRIMARY KEY,
+                    fingerprint        TEXT UNIQUE NOT NULL,
+                    voice_id           TEXT NOT NULL,
+                    voice_name         TEXT,
+                    language           TEXT NOT NULL,
+                    model_id           TEXT NOT NULL,
+                    tts_config_json    TEXT NOT NULL,
+                    tts_config_hash    TEXT NOT NULL,
+                    script_text        TEXT NOT NULL,
+                    script_hash        TEXT NOT NULL,
+                    master_audio_path  TEXT NOT NULL,
+                    duration_sec       REAL NOT NULL,
+                    sample_rate        INTEGER NOT NULL,
+                    status             TEXT NOT NULL,       -- 'generating' | 'ready' | 'failed'
+                    error              TEXT,
+                    created_at         REAL NOT NULL,
+                    last_used_at       REAL
                 );
 
                 CREATE TABLE IF NOT EXISTS settings (
@@ -104,13 +164,17 @@ def init_db() -> None:
 
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
                 CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_activity_created ON activity_logs(created_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_audio_previews_fingerprint ON audio_previews(fingerprint);
+                CREATE INDEX IF NOT EXISTS idx_audio_previews_voice_lang ON audio_previews(voice_id, language);
+                CREATE INDEX IF NOT EXISTS idx_audio_previews_created ON audio_previews(created_at DESC);
                 """
             )
             # --- Migrations: add columns introduced after the initial schema.
             # ALTER TABLE ... ADD COLUMN is idempotent-guarded by checking the
             # existing columns first, so an existing studio.db upgrades in place
             # without losing data.
-            existing = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
+            existing_jobs = {r[1] for r in conn.execute("PRAGMA table_info(jobs)").fetchall()}
             for col, decl in (
                 ("tts_provider", "TEXT DEFAULT 'ELEVENLABS'"),
                 ("test_mode", "INTEGER DEFAULT 0"),
@@ -123,9 +187,44 @@ def init_db() -> None:
                 ("tts_config_hash", "TEXT"),
                 ("sync_mode", "TEXT"),
                 ("history_item_id", "TEXT"),
+                ("is_deleted", "INTEGER DEFAULT 0"),
+                ("deleted_at", "REAL"),
+                ("audio_source", "TEXT DEFAULT 'generated'"),
+                ("preview_id", "TEXT"),
+                ("preview_fingerprint", "TEXT"),
             ):
-                if col not in existing:
+                if col not in existing_jobs:
                     conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
+
+            existing_avatars = {r[1] for r in conn.execute("PRAGMA table_info(avatars)").fetchall()}
+            for col, decl in (
+                ("is_deleted", "INTEGER DEFAULT 0"),
+                ("deleted_at", "REAL"),
+            ):
+                if col not in existing_avatars:
+                    conn.execute(f"ALTER TABLE avatars ADD COLUMN {col} {decl}")
+
+            # Indices on migrated columns
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_is_deleted ON jobs(is_deleted)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_avatars_is_deleted ON avatars(is_deleted)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_preview_id ON jobs(preview_id)")
+
+            # V1.6.0 — idempotent seed of the human-approved voice/language model
+            # profile. This is DATA (a generic profile row), not a code branch:
+            # there is no `if voice_id == ...` anywhere in the resolver. The user
+            # listened to the controlled Vietnamese A/B/C benchmark (Phase A) and
+            # approved Candidate C (eleven_v3) for THIS voice + language only.
+            # Re-running init_db never overwrites an operator-edited profile.
+            conn.execute(
+                """INSERT INTO voice_model_profiles
+                       (voice_id, language_code, preferred_model_id,
+                        selection_source, output_format, notes, approved_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(voice_id, language_code) DO NOTHING""",
+                ("N0Z0aL8qHhzwUHwRBcVo", "vi", "eleven_v3",
+                 "HUMAN_BENCHMARK_APPROVED", "mp3_44100_128",
+                 "Candidate C selected after controlled Vietnamese A/B/C test (Phase A, 2026-08-28)",
+                 _now()))
             conn.commit()
         finally:
             conn.close()
@@ -151,8 +250,9 @@ def create_job(job: Dict[str, Any]) -> None:
                        quality_warnings, user_override, truth_hash,
                        tts_provider, test_mode, test_type, edge_voice,
                        mouth_state_auto, mouth_state_user, mouth_state_provenance,
-                       tts_config, tts_config_hash, sync_mode, history_item_id)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       tts_config, tts_config_hash, sync_mode, history_item_id,
+                       is_deleted, deleted_at, audio_source, preview_id, preview_fingerprint)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     job["job_id"], _now(), _now(), job["kind"], job["avatar_id"],
                     job["voice_id"], job.get("voice_meta"), job.get("script_text"),
@@ -169,6 +269,9 @@ def create_job(job: Dict[str, Any]) -> None:
                     job.get("mouth_state_provenance"),
                     job.get("tts_config"), job.get("tts_config_hash"),
                     job.get("sync_mode"), job.get("history_item_id"),
+                    job.get("is_deleted", 0), job.get("deleted_at"),
+                    job.get("audio_source", "generated"), job.get("preview_id"),
+                    job.get("preview_fingerprint"),
                 ),
             )
             conn.commit()
@@ -200,34 +303,104 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
-def list_jobs(limit: int = 100, include_cancelled: bool = True) -> List[Dict[str, Any]]:
+def list_jobs(limit: int = 100, include_cancelled: bool = True,
+              include_deleted: bool = False) -> List[Dict[str, Any]]:
+    """List render jobs. By default, soft-deleted jobs (is_deleted=1) are excluded."""
     conn = _connect()
     try:
-        if include_cancelled:
-            rows = conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?", (limit,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM jobs WHERE status!='cancelled' ORDER BY created_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
+        where_clauses = []
+        params: List[Any] = []
+        if not include_deleted:
+            where_clauses.append("(is_deleted = 0 OR is_deleted IS NULL)")
+        if not include_cancelled:
+            where_clauses.append("status != 'cancelled'")
+
+        where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        query = f"SELECT * FROM jobs {where_sql} ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+
+        rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
 
 
+def list_trash_jobs(limit: int = 100) -> List[Dict[str, Any]]:
+    """List soft-deleted jobs for the Trash view."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE is_deleted = 1 ORDER BY deleted_at DESC, created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def soft_delete_job(job_id: str) -> bool:
+    """Mark a render job as soft-deleted. Reversible via restore_job."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "UPDATE jobs SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE job_id = ?",
+                (_now(), _now(), job_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def restore_job(job_id: str) -> bool:
+    """Restore a soft-deleted render job back to active History."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "UPDATE jobs SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE job_id = ?",
+                (_now(), job_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
 def list_active_jobs() -> List[Dict[str, Any]]:
-    """Jobs that are not in a terminal state."""
+    """Jobs that are not in a terminal state (and not soft-deleted)."""
     conn = _connect()
     try:
         active = ("queued", "preparing_audio", "preparing_avatar", "rendering",
                   "encoding", "verifying")
         rows = conn.execute(
-            f"SELECT * FROM jobs WHERE status IN ({','.join('?'*len(active))}) ORDER BY created_at",
+            f"""SELECT * FROM jobs
+                WHERE status IN ({','.join('?'*len(active))})
+                AND (is_deleted = 0 OR is_deleted IS NULL)
+                ORDER BY created_at""",
             active,
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def has_active_jobs_for_avatar(avatar_id: str) -> (bool, List[str]):
+    """Check if any non-terminal jobs currently reference avatar_id."""
+    conn = _connect()
+    try:
+        active = ("queued", "preparing_audio", "preparing_avatar", "rendering",
+                  "encoding", "verifying")
+        rows = conn.execute(
+            f"""SELECT job_id FROM jobs
+                WHERE avatar_id = ?
+                AND status IN ({','.join('?'*len(active))})
+                AND (is_deleted = 0 OR is_deleted IS NULL)""",
+            (avatar_id, *active),
+        ).fetchall()
+        active_ids = [r["job_id"] for r in rows]
+        return (len(active_ids) > 0, active_ids)
     finally:
         conn.close()
 
@@ -278,10 +451,81 @@ def get_avatar(avatar_id: str) -> Optional[Dict[str, Any]]:
         conn.close()
 
 
-def list_avatar_rows() -> List[Dict[str, Any]]:
+def rename_avatar(avatar_id: str, new_name: str) -> bool:
+    """Update display name for an avatar (metadata only; does NOT rename files/folders/IDs)."""
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return False
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "UPDATE avatars SET name=?, updated_at=? WHERE avatar_id=?",
+                (new_name, _now(), avatar_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def soft_delete_avatar(avatar_id: str) -> bool:
+    """Mark an avatar as soft-deleted. Reversible via restore_avatar."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            # Check if row exists in avatars table; if not, create it first as deleted
+            existing = conn.execute("SELECT avatar_id FROM avatars WHERE avatar_id=?", (avatar_id,)).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO avatars (avatar_id, name, is_deleted, deleted_at, created_at, updated_at) VALUES (?, ?, 1, ?, ?, ?)",
+                    (avatar_id, avatar_id, _now(), _now(), _now()),
+                )
+            else:
+                conn.execute(
+                    "UPDATE avatars SET is_deleted = 1, deleted_at = ?, updated_at = ? WHERE avatar_id = ?",
+                    (_now(), _now(), avatar_id),
+                )
+            conn.commit()
+            return True
+        finally:
+            conn.close()
+
+
+def restore_avatar(avatar_id: str) -> bool:
+    """Restore a soft-deleted avatar back to active Library."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "UPDATE avatars SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE avatar_id = ?",
+                (_now(), avatar_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def list_avatar_rows(include_deleted: bool = False) -> List[Dict[str, Any]]:
     conn = _connect()
     try:
-        rows = conn.execute("SELECT * FROM avatars ORDER BY avatar_id").fetchall()
+        if include_deleted:
+            rows = conn.execute("SELECT * FROM avatars ORDER BY avatar_id").fetchall()
+        else:
+            rows = conn.execute("SELECT * FROM avatars WHERE (is_deleted = 0 OR is_deleted IS NULL) ORDER BY avatar_id").fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def list_trash_avatars() -> List[Dict[str, Any]]:
+    """List soft-deleted avatars for the Trash view."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM avatars WHERE is_deleted = 1 ORDER BY deleted_at DESC, avatar_id ASC"
+        ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()
@@ -322,6 +566,111 @@ def get_voice_config(voice_id: str) -> Optional[Dict[str, Any]]:
 
 
 # --------------------------------------------------------------------------- #
+# V1.6.0 — language-aware config identity + human-approved profiles           #
+# --------------------------------------------------------------------------- #
+def save_voice_language_config(voice_id: str, language_code: str,
+                               resolver_policy: str, config: Dict[str, Any]) -> None:
+    """Upsert a resolved TTS config keyed by (voice_id, language_code,
+    resolver_policy). The same voice can hold a different config per language
+    with no leak. Sanitized JSON; no API key ever stored here."""
+    cfg_json = json.dumps(config, ensure_ascii=False) if isinstance(config, (dict, list)) else str(config)
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO voice_language_configs (voice_id, language_code, resolver_policy, config, updated_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(voice_id, language_code, resolver_policy)
+                   DO UPDATE SET config=excluded.config, updated_at=excluded.updated_at""",
+                (voice_id, language_code, resolver_policy, cfg_json, _now()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_voice_language_config(voice_id: str, language_code: str,
+                              resolver_policy: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT config FROM voice_language_configs WHERE voice_id=? AND language_code=? AND resolver_policy=?",
+            (voice_id, language_code, resolver_policy),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["config"])
+        except Exception:
+            return None
+    finally:
+        conn.close()
+
+
+# --- Human-approved voice/language model profiles (generic mechanism) ------- #
+def save_profile(voice_id: str, language_code: str, preferred_model_id: str,
+                 selection_source: str = "USER_MANUAL",
+                 output_format: Optional[str] = None, notes: Optional[str] = None) -> None:
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO voice_model_profiles
+                       (voice_id, language_code, preferred_model_id, selection_source,
+                        output_format, notes, approved_at)
+                   VALUES (?,?,?,?,?,?,?)
+                   ON CONFLICT(voice_id, language_code) DO UPDATE SET
+                       preferred_model_id=excluded.preferred_model_id,
+                       selection_source=excluded.selection_source,
+                       output_format=excluded.output_format,
+                       notes=excluded.notes,
+                       approved_at=excluded.approved_at""",
+                (voice_id, language_code, preferred_model_id, selection_source,
+                 output_format, notes, _now()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def get_profile(voice_id: str, language_code: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM voice_model_profiles WHERE voice_id=? AND language_code=?",
+            (voice_id, language_code),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def list_profiles() -> List[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM voice_model_profiles ORDER BY approved_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def delete_profile(voice_id: str, language_code: str) -> bool:
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "DELETE FROM voice_model_profiles WHERE voice_id=? AND language_code=?",
+                (voice_id, language_code),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+# --------------------------------------------------------------------------- #
 # Settings (non-secret only)                                                 #
 # --------------------------------------------------------------------------- #
 def get_setting(key: str, default: str = "") -> str:
@@ -344,6 +693,153 @@ def set_setting(key: str, value: str) -> None:
             conn.commit()
         finally:
             conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Activity Logs                                                               #
+# --------------------------------------------------------------------------- #
+def log_activity(action: str, resource_type: str, resource_id: str,
+                 details: Optional[Any] = None, result: str = "SUCCESS") -> None:
+    """Record an audit trail event for management operations. Never logs secrets."""
+    details_str = None
+    if details is not None:
+        if isinstance(details, (dict, list)):
+            # Sanitize any sensitive keys
+            clean = _sanitize_log_data(details)
+            details_str = json.dumps(clean, ensure_ascii=False)
+        else:
+            details_str = str(details)[:500]
+
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO activity_logs (created_at, action, resource_type, resource_id, details, result)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (_now(), str(action), str(resource_type), str(resource_id), details_str, str(result)),
+            )
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+
+def list_activity_logs(limit: int = 100) -> List[Dict[str, Any]]:
+    """List recent activity logs."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM activity_logs ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def _sanitize_log_data(data: Any) -> Any:
+    if isinstance(data, dict):
+        out = {}
+        for k, v in data.items():
+            if any(s in k.lower() for s in ("key", "secret", "token", "auth", "password")):
+                out[k] = "***REDACTED***"
+            else:
+                out[k] = _sanitize_log_data(v)
+        return out
+    elif isinstance(data, list):
+        return [_sanitize_log_data(x) for x in data]
+    return data
+
+
+# --------------------------------------------------------------------------- #
+# Audio Previews (Script Voice Preview & Audio Reuse)                         #
+# --------------------------------------------------------------------------- #
+def get_audio_preview_by_fingerprint(fingerprint: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM audio_previews WHERE fingerprint = ?", (fingerprint,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def get_audio_preview(preview_id: str) -> Optional[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT * FROM audio_previews WHERE id = ?", (preview_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def create_audio_preview(preview: Dict[str, Any]) -> None:
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """INSERT INTO audio_previews
+                   (id, fingerprint, voice_id, voice_name, language, model_id,
+                    tts_config_json, tts_config_hash, script_text, script_hash,
+                    master_audio_path, duration_sec, sample_rate, status, error,
+                    created_at, last_used_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(fingerprint) DO UPDATE SET
+                    voice_name = excluded.voice_name,
+                    tts_config_json = excluded.tts_config_json,
+                    tts_config_hash = excluded.tts_config_hash,
+                    master_audio_path = excluded.master_audio_path,
+                    duration_sec = excluded.duration_sec,
+                    sample_rate = excluded.sample_rate,
+                    status = excluded.status,
+                    error = excluded.error,
+                    last_used_at = excluded.last_used_at""",
+                (
+                    preview["id"], preview["fingerprint"], preview["voice_id"],
+                    preview.get("voice_name"), preview["language"], preview["model_id"],
+                    preview["tts_config_json"], preview["tts_config_hash"],
+                    preview["script_text"], preview["script_hash"],
+                    preview.get("master_audio_path", ""), preview.get("duration_sec", 0.0),
+                    preview.get("sample_rate", 0), preview.get("status", "generating"),
+                    preview.get("error"), preview.get("created_at", _now()),
+                    preview.get("last_used_at", _now()),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def update_audio_preview(preview_id: str, **fields) -> None:
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [preview_id]
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(f"UPDATE audio_previews SET {cols} WHERE id = ?", vals)
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def touch_audio_preview(preview_id: str) -> None:
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute("UPDATE audio_previews SET last_used_at = ? WHERE id = ?", (_now(), preview_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def list_audio_previews(limit: int = 50) -> List[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM audio_previews ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------- #

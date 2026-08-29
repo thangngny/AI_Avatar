@@ -122,13 +122,13 @@ def _creation_time(avatar_dir: str) -> Optional[float]:
         return None
 
 
-def list_avatars() -> List[Dict[str, Any]]:
+def list_avatars(include_deleted: bool = False) -> List[Dict[str, Any]]:
     """List avatar directories under data/avatars/. Excludes .uploads and
     dotfiles (raw sources / logs). Each item carries an artifact-validated
     status: "READY" (artifact-complete, v15) or "INCOMPLETE" (missing required
     artifacts). Incomplete dirs are listed (so the operator can see them and
     re-prepare) but are NOT selectable for rendering (the UI gates on
-    status=="READY"). No data is deleted."""
+    status=="READY"). Soft-deleted avatars are excluded unless include_deleted=True."""
     out = []
     if not os.path.isdir(config.AVATARS_ROOT):
         return out
@@ -138,27 +138,32 @@ def list_avatars() -> List[Dict[str, Any]]:
         d = os.path.join(config.AVATARS_ROOT, name)
         if not os.path.isdir(d):
             continue
+        row = db.get_avatar(name)
+        if not include_deleted and row and row.get("is_deleted") == 1:
+            continue
         info = _read_info(d)
         ready = _check_ready(d)
         thumb = _first_img(os.path.join(d, "full_imgs"))
+        disp_name = row.get("name") if (row and row.get("name")) else name
         item = {
             "avatar_id": name,
-            "name": name,
+            "name": disp_name,
             "avatar_type": _avatar_type(name, info),
             "ready": ready,
             "status": "READY" if ready else "INCOMPLETE",
             "thumbnail": f"/api/avatars/{name}/thumbnail",
             "quality": None,
             "source_video": (info or {}).get("video_path"),
-            "created_at": _creation_time(d),
+            "created_at": (row.get("created_at") if row and row.get("created_at") else _creation_time(d)),
             "parsing_mode": (info or {}).get("parsing_mode"),
             "version": (info or {}).get("version"),
+            "is_deleted": bool(row and row.get("is_deleted") == 1),
+            "deleted_at": row.get("deleted_at") if row else None,
             "frame_count": len([x for x in os.listdir(os.path.join(d, "full_imgs"))
                                 if x.lower().endswith((".png", ".jpg", ".jpeg"))])
             if os.path.isdir(os.path.join(d, "full_imgs")) else 0,
         }
         # merge cached quality from db if present
-        row = db.get_avatar(name)
         if row:
             item["quality"] = row.get("quality")
         # build a compact, honest quality summary for the library card
@@ -182,6 +187,74 @@ def list_avatars() -> List[Dict[str, Any]]:
         item["prepared_warnings"] = qsum["prepared_warnings"]
         out.append(item)
     return out
+
+
+def list_trash_avatars() -> List[Dict[str, Any]]:
+    """List soft-deleted avatars for the Trash view."""
+    all_avs = list_avatars(include_deleted=True)
+    return [a for a in all_avs if a.get("is_deleted")]
+
+
+def rename_avatar(avatar_id: str, new_name: str) -> Dict[str, Any]:
+    """Rename an avatar's display name in metadata (never alters filesystem ID or jobs)."""
+    aid = (avatar_id or "").strip()
+    name = (new_name or "").strip()
+    if not aid:
+        return {"ok": False, "error": "avatar_id is required."}
+    if not name:
+        return {"ok": False, "error": "Tên Avatar không được để trống."}
+    if len(name) > 80:
+        return {"ok": False, "error": "Tên Avatar tối đa 80 ký tự."}
+
+    d = os.path.join(config.AVATARS_ROOT, aid)
+    row = db.get_avatar(aid)
+    if not os.path.isdir(d) and not row:
+        return {"ok": False, "error": f"Avatar '{aid}' không tồn tại."}
+
+    old_name = row.get("name") if row else aid
+    db.upsert_avatar(aid, name=name)
+    db.log_activity("AVATAR_RENAME", "avatar", aid, {"old_name": old_name, "new_name": name})
+    return {"ok": True, "avatar_id": aid, "name": name}
+
+
+def delete_avatar(avatar_id: str) -> Dict[str, Any]:
+    """Soft delete an avatar. Enforces strict active job dependency guard."""
+    aid = (avatar_id or "").strip()
+    if not aid:
+        return {"ok": False, "error": "avatar_id is required."}
+
+    has_active, active_jobs = db.has_active_jobs_for_avatar(aid)
+    if has_active:
+        db.log_activity("AVATAR_DELETE", "avatar", aid,
+                        {"active_jobs": active_jobs}, result="CONFLICT")
+        return {
+            "ok": False,
+            "conflict": True,
+            "error": "Avatar này đang được sử dụng bởi một tác vụ đang chờ hoặc đang render. Hãy hủy/dừng tác vụ trước khi xóa Avatar.",
+            "active_jobs": active_jobs,
+        }
+
+    db.soft_delete_avatar(aid)
+    db.log_activity("AVATAR_DELETE", "avatar", aid, {"result": "soft_deleted"})
+    return {"ok": True, "avatar_id": aid, "deleted": True}
+
+
+def restore_avatar(avatar_id: str) -> Dict[str, Any]:
+    """Restore a soft-deleted avatar. Validates on-disk artifact integrity before restoring."""
+    aid = (avatar_id or "").strip()
+    if not aid:
+        return {"ok": False, "error": "avatar_id is required."}
+
+    d = os.path.join(config.AVATARS_ROOT, aid)
+    if not os.path.isdir(d) or not _check_ready(d):
+        return {
+            "ok": False,
+            "error": f"Không thể khôi phục: Thư mục dữ liệu '{aid}' không còn đầy đủ 5 tệp MuseTalk cần thiết trên đĩa.",
+        }
+
+    db.restore_avatar(aid)
+    db.log_activity("AVATAR_RESTORE", "avatar", aid, {"result": "restored"})
+    return {"ok": True, "avatar_id": aid, "restored": True}
 
 
 def avatar_counts() -> Dict[str, int]:

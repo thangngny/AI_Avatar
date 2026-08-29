@@ -16,6 +16,17 @@ GENAVATAR = os.path.join(ROOT, "avatars", "musetalk", "genavatar.py")
 TRUTH_PATH = os.path.join(ROOT, "config", "render_truth.json")
 SYSTEM_STATUS = os.path.join(ROOT, "system_status.py")
 
+# --- Runtime hardening (V1.6.0) -------------------------------------------
+# The ONE torch-capable interpreter that is allowed to run the Studio. The
+# launcher and run_studio.py enforce this; a process running under any other
+# interpreter is reported RUNTIME_MISMATCH and must not claim READY. May be
+# overridden via STUDIO_CANONICAL_INTERPRETER for a relocated runtime.
+CANONICAL_INTERPRETER = os.environ.get(
+    "STUDIO_CANONICAL_INTERPRETER", r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
+).strip()
+# Single source of truth for the browser<->backend API contract version.
+API_CONTRACT_PATH = os.path.join(ROOT, "config", "api_contract.json")
+
 # --- Avatar data ---------------------------------------------------------
 AVATARS_ROOT = os.path.join(ROOT, "data", "avatars")
 RAW_SOURCES_ROOT = os.path.join(ROOT, "data", "input", "avatar_sources")
@@ -23,12 +34,17 @@ RAW_SOURCES_ROOT = os.path.join(ROOT, "data", "input", "avatar_sources")
 # --- Runtime / output (writable, NOT Git-tracked) ------------------------
 STUDIO_DIR = HERE
 RUNTIME_DIR = os.path.join(ROOT, "data", "studio_runtime")
-TEMP_DIR = os.path.join(RUNTIME_DIR, "temp")          # previews, temp audio
+TEMP_DIR = os.path.join(RUNTIME_DIR, "temp")          # temp scratch audio
+PREVIEWS_DIR = os.path.join(RUNTIME_DIR, "audio_previews")  # persistent script voice previews
+VOICE_SAMPLES_DIR = os.path.join(RUNTIME_DIR, "voice_samples")  # pre-generated static voice samples
 # Render output directory. Overridable via STUDIO_RENDERS_DIR (V1.4.1 R04) so
 # the system is not hard-coupled to the D: drive on another machine. Default
 # preserves the exact current production path.
 RENDERS_DIR = os.environ.get("STUDIO_RENDERS_DIR", "").strip() or r"D:\CongThang_AI_Avatar\renders"
 DB_PATH = os.path.join(RUNTIME_DIR, "studio.db")
+# Runtime instance manifest (process identity + fingerprints). Lives under the
+# gitignored studio_runtime namespace so machine-specific state is never tracked.
+INSTANCE_MANIFEST_PATH = os.path.join(RUNTIME_DIR, "studio_instance.json")
 LOG_DIR = os.path.join(RUNTIME_DIR, "logs")            # per-job technical logs
 
 # --- ElevenLabs ----------------------------------------------------------
@@ -60,7 +76,7 @@ RENDER_GPU_TIMEOUT_SEC = 1800  # 30 min hard cap per job (10s test is far under)
 
 
 def ensure_runtime_dirs() -> None:
-    for d in (RUNTIME_DIR, TEMP_DIR, LOG_DIR):
+    for d in (RUNTIME_DIR, TEMP_DIR, LOG_DIR, PREVIEWS_DIR, VOICE_SAMPLES_DIR):
         os.makedirs(d, exist_ok=True)
 
 

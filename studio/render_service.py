@@ -111,7 +111,8 @@ def _master_path(script_text: str, voice_id: str, tts_provider: str) -> str:
 def generate_master_audio(script_text: str, voice_id: str,
                            target_sec: Optional[float] = None,
                            tts_provider: str = ELEVENLABS,
-                           tts_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                           tts_config: Optional[Dict[str, Any]] = None,
+                           master_audio_override: Optional[str] = None) -> Dict[str, Any]:
     """Generate the audio for a script part + voice + provider.
 
     V1.5.0 two-audio-path (ElevenLabs with a resolved tts_config):
@@ -122,6 +123,11 @@ def generate_master_audio(script_text: str, voice_id: str,
         conditioning only).
     Without a tts_config (legacy ElevenLabs / Edge TTS): master_path == cond_path
     (the existing 16 kHz mono path) — backward compatible.
+
+    V1.6.0 Script Voice Preview reuse:
+      - If master_audio_override (or matching cached preview) is valid, reuses the
+        lossless MASTER audio directly and resamples to 16 kHz conditioning without
+        calling ElevenLabs again.
 
     Providers are EXPLICIT and never fall back to each other (spec B8):
       ELEVENLABS     -> elevenlabs_client (exact voice_id, fail-closed)
@@ -141,6 +147,44 @@ def generate_master_audio(script_text: str, voice_id: str,
         text = " ".join(words[:target_words])
         if not text:
             return {"ok": False, "error": "Script too short for a test render."}
+
+    # 1. Direct Master Audio Override (e.g. reused from Script Voice Preview)
+    if master_audio_override and os.path.isfile(master_audio_override) and os.path.getsize(master_audio_override) > 1000:
+        try:
+            from . import preview_service
+            import soundfile as sf
+            os.makedirs(os.path.join(config.TEMP_DIR, "master"), exist_ok=True)
+            cond_path = os.path.join(config.TEMP_DIR, "master", f"cond_{abs(hash(master_audio_override))%10000000}.wav")
+            preview_service.derive_cond_from_master(master_audio_override, cond_path)
+            dur = float(sf.info(cond_path).duration)
+            db.log_activity("RENDER_USED_SCRIPT_PREVIEW", "render", voice_id,
+                            {"master_path": master_audio_override, "duration_sec": dur})
+            return {"ok": True, "master_path": master_audio_override, "cond_path": cond_path,
+                    "duration_sec": dur, "reused": True, "source": "script_preview"}
+        except Exception:
+            pass
+
+    # 2. Check if matching valid Script Preview exists in database
+    if tts_provider == ELEVENLABS and tts_config and not target_sec:
+        try:
+            from . import preview_service
+            import soundfile as sf
+            lang = tts_config.get("target_language") or "vi"
+            fp = preview_service.compute_preview_fingerprint(text, voice_id, lang, tts_config)
+            prev_row = db.get_audio_preview_by_fingerprint(fp)
+            if prev_row and prev_row.get("status") == "ready":
+                p_master = prev_row.get("master_audio_path")
+                if p_master and os.path.isfile(p_master) and os.path.getsize(p_master) > 1000:
+                    cond_path = os.path.join(config.TEMP_DIR, "master", f"cond_prev_{prev_row['id']}.wav")
+                    preview_service.derive_cond_from_master(p_master, cond_path)
+                    dur = float(sf.info(cond_path).duration)
+                    db.touch_audio_preview(prev_row["id"])
+                    db.log_activity("RENDER_USED_SCRIPT_PREVIEW", "render", prev_row["id"],
+                                    {"master_path": p_master, "duration_sec": dur})
+                    return {"ok": True, "master_path": p_master, "cond_path": cond_path,
+                            "duration_sec": dur, "reused": True, "source": "script_preview", "preview_id": prev_row["id"]}
+        except Exception:
+            pass
 
     if tts_provider == EDGE_TTS_TEST:
         if not edge.is_available():
@@ -167,13 +211,14 @@ def generate_master_audio(script_text: str, voice_id: str,
         return {"ok": False, "error": "ElevenLabs API key not configured."}
 
     if tts_config:
-        # Two-audio-path: keyed by the resolved config hash (different model/
-        # settings/output_format -> fresh master). master != cond when the
-        # resolved output_format is higher-bandwidth than 16 kHz.
+        # Two-audio-path: keyed by the script text key + resolved config hash
+        # (different text/model/settings/output_format -> fresh master). master != cond
+        # when the resolved output_format is higher-bandwidth than 16 kHz.
         ch = el.tts_config_hash(tts_config)
+        mk = _master_key(text, voice_id, ELEVENLABS)
         os.makedirs(os.path.join(config.TEMP_DIR, "master"), exist_ok=True)
-        master = os.path.join(config.TEMP_DIR, "master", f"{ch}_master.wav")
-        cond = os.path.join(config.TEMP_DIR, "master", f"{ch}_cond.wav")
+        master = os.path.join(config.TEMP_DIR, "master", f"{mk}_{ch}_master.wav")
+        cond = os.path.join(config.TEMP_DIR, "master", f"{mk}_{ch}_cond.wav")
         if os.path.exists(cond) and os.path.getsize(cond) > 1000:
             try:
                 import soundfile as sf
@@ -279,6 +324,9 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
     feed the same locked production renderer; only the audio source differs.
     V1.5.0: a resolved ElevenLabs tts_config is snapshotted into the job."""
     provider = _provider_for(tts_provider)
+    av_row = db.get_avatar(avatar_id)
+    if av_row and av_row.get("is_deleted") == 1:
+        return {"ok": False, "error": f"Avatar '{avatar_id}' đã bị chuyển vào Thùng rác. Hãy khôi phục trước khi render."}
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
     if not match or not match["ready"]:
@@ -293,6 +341,25 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
     tts_config_json = json.dumps(tts_config, ensure_ascii=False) if tts_config else None
     tts_config_hash = el.tts_config_hash(tts_config) if tts_config else None
     hist_id = (tts_config or {}).get("history_item_id") if tts_config else None
+
+    audio_src = "generated"
+    p_id = None
+    p_fp = None
+    m_path = None
+    if provider == ELEVENLABS and tts_config and not test_mode:
+        try:
+            from . import preview_service
+            lang = tts_config.get("target_language") or "vi"
+            p_fp = preview_service.compute_preview_fingerprint(script_text, voice_id, lang, tts_config)
+            prev_row = db.get_audio_preview_by_fingerprint(p_fp)
+            if prev_row and prev_row.get("status") == "ready":
+                p_id = prev_row["id"]
+                m_path = preview_service.snapshot_preview_for_job(p_id, job_id)
+                if m_path:
+                    audio_src = "script_preview"
+        except Exception:
+            pass
+
     db.create_job({
         "job_id": job_id, "kind": "test10s", "avatar_id": avatar_id,
         "voice_id": voice_id, "voice_meta": json.dumps(voice_meta, ensure_ascii=False) if voice_meta else None,
@@ -305,6 +372,10 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
         "tts_config": tts_config_json, "tts_config_hash": tts_config_hash,
         "sync_mode": sync_mode, "history_item_id": hist_id,
+        "audio_source": audio_src,
+        "preview_id": p_id,
+        "preview_fingerprint": p_fp,
+        "master_audio_path": m_path,
     })
     _wake_worker()
     return {"ok": True, "job_id": job_id}
@@ -318,6 +389,9 @@ def create_mouth_test_job(avatar_id: str, edge_voice: str,
     script by default so Avatar A vs Avatar B is comparable under identical
     text/voice/profile. Never falls back to ElevenLabs."""
     provider = EDGE_TTS_TEST
+    av_row = db.get_avatar(avatar_id)
+    if av_row and av_row.get("is_deleted") == 1:
+        return {"ok": False, "error": f"Avatar '{avatar_id}' đã bị chuyển vào Thùng rác. Hãy khôi phục trước khi render."}
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
     if not match or not match["ready"]:
@@ -355,9 +429,16 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
 
     V1.5.0: tts_config (the resolved per-voice ElevenLabs config) is snapshotted
     into each job at submission, with a deterministic tts_config_hash. The
-    render uses that snapshot — it never re-fetches/settings mid-job."""
+    render uses that snapshot — it never re-fetches/settings mid-job.
+
+    V1.6.0: if a matching Script Voice Preview exists, its validated MASTER audio
+    is snapshotted directly into the job, saving ElevenLabs quota and guaranteeing
+    identical acoustic output."""
     provider = _provider_for(tts_provider)
     from . import script_service
+    av_row = db.get_avatar(avatar_id)
+    if av_row and av_row.get("is_deleted") == 1:
+        return {"ok": False, "error": f"Avatar '{avatar_id}' đã bị chuyển vào Thùng rác. Hãy khôi phục trước khi render."}
     av = avatar_service.list_avatars()
     match = next((a for a in av if a["avatar_id"] == avatar_id), None)
     if not match or not match["ready"]:
@@ -377,6 +458,24 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
     for part in sp["parts"]:
         job_id = _new_job_id()
         out = _output_path("full", avatar_id, part["label"], job_id)
+        audio_src = "generated"
+        p_id = None
+        p_fp = None
+        m_path = None
+        if provider == ELEVENLABS and tts_config:
+            try:
+                from . import preview_service
+                lang = tts_config.get("target_language") or "vi"
+                p_fp = preview_service.compute_preview_fingerprint(part["text"], voice_id, lang, tts_config)
+                prev_row = db.get_audio_preview_by_fingerprint(p_fp)
+                if prev_row and prev_row.get("status") == "ready":
+                    p_id = prev_row["id"]
+                    m_path = preview_service.snapshot_preview_for_job(p_id, job_id)
+                    if m_path:
+                        audio_src = "script_preview"
+            except Exception:
+                pass
+
         db.create_job({
             "job_id": job_id, "kind": "full", "avatar_id": avatar_id,
             "voice_id": voice_id,
@@ -393,6 +492,10 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
             "edge_voice": voice_id if provider == EDGE_TTS_TEST else None,
             "tts_config": tts_config_json, "tts_config_hash": tts_config_hash,
             "sync_mode": sync_mode, "history_item_id": hist_id,
+            "audio_source": audio_src,
+            "preview_id": p_id,
+            "preview_fingerprint": p_fp,
+            "master_audio_path": m_path,
         })
         job_ids.append(job_id)
     _wake_worker()
@@ -413,6 +516,8 @@ def retry_job(job_id: str) -> Dict[str, Any]:
                            job.get("script_name") or job["kind"], job_id)
     db.update_job(job_id, status="queued", progress=0, stage="Queued",
                   error=None, output_path=new_out)
+    db.log_activity("JOB_RETRY", "job", job_id,
+                    {"avatar_id": job.get("avatar_id"), "output_path": new_out})
     _wake_worker()
     return {"ok": True, "job_id": job_id}
 
@@ -424,6 +529,8 @@ def cancel_job(job_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "Job not found."}
     if job["status"] in ("complete", "failed", "cancelled"):
         return {"ok": False, "error": f"Job already {job['status']}."}
+    
+    action = "JOB_STOP" if job.get("status") in ("preparing_audio", "rendering", "encoding", "verifying") else "JOB_CANCEL"
     db.update_job(job_id, status="cancelled", stage="Cancelled")
     pid = job.get("pid")
     if pid:
@@ -431,7 +538,33 @@ def cancel_job(job_id: str) -> Dict[str, Any]:
     gpu = job.get("gpu_id")
     if gpu is not None:
         gpu_service.release(gpu)
+    db.log_activity(action, "job", job_id, {"status": job.get("status")})
     return {"ok": True, "job_id": job_id}
+
+
+def delete_render(job_id: str) -> Dict[str, Any]:
+    """Soft delete a completed/failed/cancelled render from active History."""
+    job = db.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "Job not found."}
+    if job.get("status") in ("preparing_audio", "rendering", "encoding", "verifying"):
+        return {"ok": False, "error": "Không thể xóa tác vụ đang render. Hãy dừng tác vụ trước."}
+    db.soft_delete_job(job_id)
+    db.log_activity("RENDER_DELETE", "render", job_id, {"output_path": job.get("output_path")})
+    return {"ok": True, "job_id": job_id, "deleted": True}
+
+
+def restore_render(job_id: str) -> Dict[str, Any]:
+    """Restore a soft-deleted render back to active History."""
+    job = db.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "Job not found."}
+    if job.get("status") == "complete" and job.get("output_path"):
+        if not os.path.exists(job["output_path"]):
+            return {"ok": False, "error": "Không thể khôi phục: Tệp video kết quả không còn tồn tại trên đĩa."}
+    db.restore_job(job_id)
+    db.log_activity("RENDER_RESTORE", "render", job_id, {"output_path": job.get("output_path")})
+    return {"ok": True, "job_id": job_id, "restored": True}
 
 
 def _kill_pid(pid: int) -> None:
@@ -538,9 +671,11 @@ def _run_job(job_id: str, gpu_id: int) -> None:
     provider = job.get("tts_provider") or ELEVENLABS
     target_sec = 10.0 if job["kind"] in ("test10s", "mouhtest") else None
     tts_config = db.parse_json_field(job.get("tts_config"))  # resolved per-voice config (V1.5.0) or None
+    master_override = job.get("master_audio_path") if job.get("audio_source") == "script_preview" else None
     audio = generate_master_audio(job["script_text"], job["voice_id"],
                                   target_sec=target_sec, tts_provider=provider,
-                                  tts_config=tts_config)
+                                  tts_config=tts_config,
+                                  master_audio_override=master_override)
     if not audio["ok"]:
         db.update_job(job_id, status="failed", stage="Failed", error=audio["error"])
         gpu_service.release(gpu_id)
@@ -686,6 +821,17 @@ def start() -> None:
     load_truth()
     db.init_db()
     _reconcile_inflight_jobs()
+    # V1.6.0 — runtime preflight at launch (fail-fast). Populates the cached
+    # preflight so /api/system/status surfaces renderer readiness immediately; a
+    # wrong/broken interpreter is discovered here, not at the first render.
+    try:
+        from . import runtime as _rt
+        rt = _rt.preflight(refresh=True, ttl=0)
+        if not rt.get("renderer_ready"):
+            print(f"[runtime] NOT_READY: {rt.get('torch_error') or rt.get('error') or 'CUDA unavailable'} "
+                  f"(interpreter={rt.get('interpreter')})")
+    except Exception as _e:
+        print(f"[runtime] preflight failed: {_e}")
 
 
 # Transient states that imply a child process was running. If the Studio process

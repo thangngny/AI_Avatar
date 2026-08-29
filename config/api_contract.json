@@ -1,0 +1,4 @@
+{
+  "_comment": "Single source of truth for the AI Avatar Studio frontend<->backend API contract. Bump 'contract_version' whenever a browser-facing route contract changes. The backend FREEZES this value at server startup; the frontend embeds the same value in app.js and sends it on /api/system/status?frontend_contract=. A mismatch means the running backend predates the served frontend and a restart is required. NOTE: the frontend copy in studio/static/app.js (STUDIO_API_CONTRACT) must stay identical; tests/test_runtime_hardening.py asserts this.",
+  "contract_version": "2026-08-29.1"
+}

@@ -89,3 +89,16 @@ _cleanup_uploads.py
 # AI Avatar Studio runtime (DB, temp audio, prep logs) — under data/, already
 # ignored, but make it explicit so the local studio state is never committed.
 data/studio_runtime/
+
+# --- V1.6 release safety (narrow) -------------------------------------------
+# Internal / one-off acceptance + audit scripts (underscore-prefixed). Permanent
+# tools (restart_studio.py, verify_runtime.py, rebuild_runtime.ps1) are NOT
+# underscore-prefixed and remain tracked.
+tools/_*.py
+# Redundant compressed duplicates of the readable docs/HDSD_V1*0_ASSETS/ folders.
+docs/*.zip
+docs/*.7z
+# Internal V1.4.x technology-handover packages (not V1.6 product source).
+handover/
+# Private / commercial test script (customer narration content, not a generic demo).
+input4_9/

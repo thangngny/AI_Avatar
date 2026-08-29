@@ -1,0 +1,55 @@
+{
+  "schema": "ai_avatar_studio.runtime_manifest",
+  "version": "1.6.0",
+  "scope": "LOCAL_INSTALLATION note: canonical_runtime_path is machine-specific; the rest is portable.",
+  "python": {
+    "major_minor": "3.10",
+    "exact_base_tested": "C:\\Users\\Admin\\AppData\\Local\\Programs\\Python\\Python310\\python.exe",
+    "version_tested": "3.10.11"
+  },
+  "canonical_runtime_path_local": "D:\\CongThang_AI_Avatar\\runtime\\venv",
+  "canonical_python_executable_local": "D:\\CongThang_AI_Avatar\\runtime\\venv\\Scripts\\python.exe",
+  "venv_design": {
+    "include_system_site_packages": false,
+    "self_contained": true,
+    "rationale": "All production deps installed INTO the venv (no base-package mixing). Proven by D:\\CongThang_AI_Avatar\\handover_rebuild_test\\venv + requirements-handover.lock."
+  },
+  "torch_stack": {
+    "torch": "2.5.1+cu121",
+    "torchvision": "0.20.1+cu121",
+    "torchaudio": "not required by the production renderer (not in lock)",
+    "cuda_build": "cu121 (CUDA 12.1)",
+    "torch_index_url": "https://download.pytorch.org/whl/cu121",
+    "gpu_tested": "2x NVIDIA RTX 3090 (driver 610.88)"
+  },
+  "lock_source": {
+    "file": "requirements-handover.lock",
+    "captured_from": "C:\\CongThang\\AI_avatar\\latentsync_env (Python 3.10.11) before it was broken",
+    "full_freeze_evidence": "diagnostics/handover/pip_freeze_torch.txt (107 pkgs)",
+    "sha1_note": "recompute with: python -c \"import hashlib;print(hashlib.sha1(open('requirements-handover.lock','rb').read()).hexdigest())\""
+  },
+  "required_imports_renderer": [
+    "torch", "torchvision", "cv2", "numpy", "soundfile", "diffusers", "transformers",
+    "accelerate", "omegaconf", "PIL", "decord", "einops", "mediapipe", "insightface",
+    "face_alignment", "kornia", "onnxruntime", "ffmpeg-python", "imageio_ffmpeg", "librosa"
+  ],
+  "required_imports_controller": [
+    "flask", "requests", "soundfile", "numpy", "cv2", "edge_tts", "psutil"
+  ],
+  "renderer_entrypoint": "generate_video_from_script.py",
+  "controller_entrypoint": "run_studio.py",
+  "production_truth_hash_expected": "a5a0e55f46c29c1722efc5cc3f8fec3d902260f0",
+  "validation_commands": {
+    "pip_check": "<canonical-python> -m pip check",
+    "verify_runtime": "<canonical-python> tools/verify_runtime.py",
+    "system_status": "<canonical-python> system_status.py",
+    "tests": "<canonical-python> -m unittest tests.test_studio tests.test_language_resolver tests.test_two_voice_lock"
+  },
+  "do_not": [
+    "do NOT copy an existing venv to a new path (recreate from the lock)",
+    "do NOT install latest torch (pin 2.5.1+cu121)",
+    "do NOT modify global PATH / registry to make production work (use the absolute canonical interpreter)",
+    "do NOT delete old environments without explicit user approval",
+    "do NOT store API keys / secrets here"
+  ]
+}

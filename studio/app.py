@@ -6,6 +6,7 @@ independent lip-sync truth and exposes no editable gain/ctx/offset/fps
 controls. The ElevenLabs API key is read from .env and never returned in full.
 """
 import os
+import sys
 import json
 import re
 import time
@@ -29,6 +30,7 @@ from . import render_service
 from . import elevenlabs_client as el
 from . import edge_tts_client as edge
 from . import share_auth
+from . import voices as voice_allowlist
 
 app = Flask(__name__, static_folder=None)
 app.config["JSON_AS_ASCII"] = False
@@ -453,10 +455,27 @@ def uploads_complete(upload_id):
 @app.route("/api/system/status")
 def system_status():
     from .render_service import load_truth
+    from . import runtime as _rt
+    from . import runtime_guard
     truth = load_truth()
     avatars = avatar_service.list_avatars()
     counts = avatar_service.avatar_counts()
     gpus = gpu_service.status()
+    rt = _rt.preflight()  # cached runtime preflight (torch/CUDA/renderer readiness)
+    # V1.6.0 hardening: frontend sends its embedded contract version so the
+    # backend can judge frontend/backend contract sync.
+    frontend_contract = request.args.get("frontend_contract", "") or ""
+    snap = runtime_guard.runtime_status_snapshot(frontend_contract=frontend_contract)
+    # Drift transition logging: once per newly-changed fingerprint (not per poll).
+    drift = runtime_guard.note_drift_if_changed()
+    if drift:
+        print("[runtime_guard] " + drift)
+    # Composite operator-facing readiness: never silently READY when the code
+    # drifted, the contract mismatched, or the canonical runtime is wrong.
+    hardening_ready = (snap["code_sync"] == "CURRENT"
+                       and snap["contract_sync"]
+                       and snap["process"]["canonical_runtime"]
+                       and truth["ok"])
     return jsonify({
         "renderer_ready": os.path.exists(config.RENDERER),
         "musetalk_ready": os.path.isdir(os.path.join(config.ROOT, "models", "musetalkV15")),
@@ -476,7 +495,115 @@ def system_status():
         "ready_avatars": counts["ready_avatars"],
         "incomplete_avatars": counts["incomplete_avatars"],
         "active_jobs": [j for j in db.list_active_jobs()],
+        # V1.6.0 — runtime preflight (fail-fast on a wrong/broken interpreter).
+        "runtime": rt,
+        "runtime_ready": bool(rt.get("renderer_ready")),
+        # V1.6.0 — runtime/deployment hardening (process / code / contract).
+        "ready": hardening_ready,
+        "process": snap["process"],
+        "code": snap["code"],
+        "contract": snap["contract"],
+        "production_truth": snap["production_truth"],
+        "code_sync": snap["code_sync"],
+        "contract_sync": snap["contract_sync"],
+        "restart_required": snap["restart_required"],
+        "studio_accepting_new_work": snap["studio_accepting_new_work"],
     })
+
+
+@app.route("/api/runtime/status")
+def runtime_status():
+    """V1.6.0 runtime preflight: which Python is the renderer using? which Torch /
+    CUDA? are GPUs visible? is the renderer ready? Read-only, no secrets. Pass
+    refresh=1 to force a fresh probe."""
+    from . import runtime as _rt
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify(_rt.preflight(refresh=refresh, ttl=0))
+
+
+# --------------------------------------------------------------------------- #
+# V1.6.0 — Controlled restart (owner-direct only; never remote).              #
+# --------------------------------------------------------------------------- #
+@app.route("/api/studio/restart", methods=["POST"])
+def studio_restart():
+    """Trigger a CONTROLLED restart of the local Studio. Restricted to the
+    owner browsing localhost directly (not via the Cloudflare tunnel) — remote
+    collaborators never receive OS process-control privileges.
+
+    The endpoint spawns the orchestrator (tools/restart_studio.py) DETACHED and
+    returns immediately; the orchestrator waits briefly for this response to
+    flush, then stops the verified Studio and relaunches it under the canonical
+    runtime. No backend code is hot-reloaded.
+    """
+    if not _is_owner_direct():
+        return jsonify({"ok": False,
+                        "error": "Studio cần được quản trị viên khởi động lại. "
+                                 "Chỉ máy chủ cục bộ mới có quyền khởi động lại."}), 403
+    from . import runtime_guard
+    force = (request.args.get("force", "0") in ("1", "true", "yes")
+             or (request.get_json(silent=True) or {}).get("force") in (True, "1", "true", "yes"))
+    active = db.list_active_jobs()
+    if active and not force:
+        return jsonify({
+            "ok": False, "blocked": True, "reason": "ACTIVE_JOBS_BLOCK_RESTART",
+            "active_jobs": [{"job_id": j.get("job_id"), "status": j.get("status")}
+                            for j in active],
+            "error": "Có render đang chạy. Hoàn tất (hoặc huỷ) các job trước, "
+                     "hoặc dùng --force để ép khởi động lại.",
+        }), 409
+    script = os.path.join(config.ROOT, "tools", "restart_studio.py")
+    if not os.path.isfile(script):
+        return jsonify({"ok": False, "error": "restart orchestrator not found"}), 500
+    cmd = [sys.executable, script]
+    if force:
+        cmd.append("--force")
+    try:
+        # Detach so the orchestrator survives this server being stopped.
+        if os.name == "nt":
+            DETACHED_PROCESS = 0x00000008
+            CREATE_NEW_PROCESS_GROUP = 0x00000200
+            subprocess.Popen(cmd, cwd=config.ROOT,
+                             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            subprocess.Popen(cmd, cwd=config.ROOT, start_new_session=True,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"failed to launch restart: {e}"}), 500
+    try:
+        db.log_activity(action="STUDIO_RESTART_REQUESTED", resource_type="studio",
+                        resource_id="self", details={"force": bool(force)}, result="SUCCESS")
+    except Exception:
+        pass
+    snap = runtime_guard.startup_snapshot()
+    return jsonify({"ok": True, "restarting": True, "boot_id": snap.get("boot_id"),
+                    "force": bool(force)})
+
+
+@app.route("/api/studio/shutdown", methods=["POST"])
+def studio_shutdown():
+    """Graceful self-shutdown (owner-direct only). Used by the controlled
+    restart orchestrator to stop the current Studio cleanly before relaunching.
+    Schedules an exit shortly AFTER the HTTP response flushes so the caller
+    receives the 200. Remote collaborators cannot reach this."""
+    if not _is_owner_direct():
+        return jsonify({"ok": False,
+                        "error": "Chỉ máy chủ cục bộ mới có quyền tắt Studio."}), 403
+    import threading
+
+    def _exit_later():
+        time.sleep(1.5)
+        try:
+            db.log_activity(action="STUDIO_SHUTDOWN", resource_type="studio",
+                            resource_id="self", details={}, result="SUCCESS")
+        except Exception:
+            pass
+        # Flush, then stop. The dev server has no graceful hook; os._exit ends
+        # the process and its worker thread without corrupting the DB.
+        os._exit(0)
+
+    threading.Thread(target=_exit_later, daemon=True).start()
+    return jsonify({"ok": True, "shutting_down": True})
 
 
 def _dir_writable(path: str) -> bool:
@@ -526,6 +653,38 @@ def avatar_thumbnail(avatar_id):
     if not p or not os.path.isfile(p):
         abort(404)
     return send_file(p, mimetype="image/png")
+
+
+@app.route("/api/avatars/<avatar_id>/rename", methods=["POST"])
+def avatar_rename_route(avatar_id):
+    safe_id = _sanitize_filename(avatar_id)
+    data = request.get_json(silent=True) or {}
+    new_name = (data.get("name") or "").strip()
+    if not new_name:
+        return jsonify({"ok": False, "error": "Tên Avatar không được để trống."}), 400
+    res = avatar_service.rename_avatar(safe_id, new_name)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/api/avatars/<avatar_id>/delete", methods=["POST"])
+def avatar_delete_route(avatar_id):
+    safe_id = _sanitize_filename(avatar_id)
+    res = avatar_service.delete_avatar(safe_id)
+    if not res.get("ok"):
+        code = 409 if res.get("conflict") else 400
+        return jsonify(res), code
+    return jsonify(res)
+
+
+@app.route("/api/avatars/<avatar_id>/restore", methods=["POST"])
+def avatar_restore_route(avatar_id):
+    safe_id = _sanitize_filename(avatar_id)
+    res = avatar_service.restore_avatar(safe_id)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    return jsonify(res)
 
 
 @app.route("/api/avatar/analyze", methods=["POST"])
@@ -750,6 +909,162 @@ def voice_preview_file(name):
 
 
 # --------------------------------------------------------------------------- #
+# V1.6.0 — Script Voice Preview & Static Voice Samples                        #
+# --------------------------------------------------------------------------- #
+@app.route("/api/audio-preview", methods=["POST"])
+def create_or_get_audio_preview():
+    from . import preview_service
+    data = request.get_json(silent=True) or {}
+    vid = (data.get("voice_id") or "").strip()
+    text = (data.get("script_text") or data.get("text") or "").strip()
+    lang = (data.get("target_language") or "vi").strip()
+    tts_config = data.get("tts_config")
+    voice_name = data.get("voice_name")
+    refresh = bool(data.get("refresh", False))
+
+    if not vid:
+        return jsonify({"ok": False, "error": "Chưa chọn giọng đọc."}), 400
+    if not text:
+        return jsonify({"ok": False, "error": "Chưa nhập kịch bản."}), 400
+
+    res = preview_service.get_or_create_script_preview(
+        script_text=text,
+        voice_id=vid,
+        target_language=lang,
+        tts_config=tts_config,
+        voice_name=voice_name,
+        refresh=refresh,
+    )
+    status_code = 200 if res.get("ok") else 400
+    return jsonify(res), status_code
+
+
+def _safe_voice_label(voice_name: str = "", voice_id: str = "") -> str:
+    """Generate concise, clean ASCII label for audio downloads."""
+    vid = (voice_id or "").strip()
+    vname = (voice_name or "").strip().lower()
+    if vid == "N0Z0aL8qHhzwUHwRBcVo" or "thanh" in vname:
+        return "Thanh"
+    if vid == "pGapy9MNHCukzJtjavF0" or "hanh" in vname or "hạnh" in vname:
+        return "Hanh"
+    clean = re.sub(r"[^A-Za-z0-9]+", "_", vname).strip("_")
+    return clean[:24] if clean else (vid[:12] if vid else "voice")
+
+
+@app.route("/api/audio-preview/<preview_id>")
+def get_audio_preview_meta(preview_id):
+    safe_id = _sanitize_filename(preview_id)
+    if not re.match(r"^prev_\d+_[0-9a-fA-F]+$", safe_id):
+        return jsonify({"ok": False, "error": "Mã bản đọc không hợp lệ."}), 400
+    row = db.get_audio_preview(safe_id)
+    if not row:
+        return jsonify({"ok": False, "error": "Không tìm thấy bản đọc kịch bản."}), 404
+    return jsonify({
+        "ok": True,
+        "preview": {
+            "id": row["id"],
+            "fingerprint": row["fingerprint"],
+            "voice_id": row["voice_id"],
+            "voice_name": row.get("voice_name"),
+            "language": row["language"],
+            "model_id": row["model_id"],
+            "duration_sec": float(row["duration_sec"]),
+            "sample_rate": int(row["sample_rate"]),
+            "status": row["status"],
+            "error": row.get("error"),
+            "preview_url": f"/api/audio-preview/{row['id']}/audio",
+            "download_url": f"/api/audio-preview/{row['id']}/download",
+        }
+    })
+
+
+@app.route("/api/audio-preview/<preview_id>/audio")
+def stream_audio_preview(preview_id):
+    safe_id = _sanitize_filename(preview_id)
+    if not re.match(r"^prev_\d+_[0-9a-fA-F]+$", safe_id):
+        abort(400)
+    row = db.get_audio_preview(safe_id)
+    if not row:
+        abort(404)
+    master_path = row.get("master_audio_path")
+    if not master_path or not os.path.isfile(master_path):
+        abort(404)
+    # Security: Verify path is strictly within PREVIEWS_DIR
+    real_master = os.path.abspath(master_path)
+    real_previews = os.path.abspath(config.PREVIEWS_DIR)
+    if not (real_master.startswith(real_previews + os.sep) or real_master == real_previews):
+        abort(403)
+    return send_file(master_path, mimetype="audio/wav", conditional=True)
+
+
+@app.route("/api/audio-preview/<preview_id>/download")
+def download_audio_preview(preview_id):
+    safe_id = _sanitize_filename(preview_id)
+    if not re.match(r"^prev_\d+_[0-9a-fA-F]+$", safe_id):
+        return jsonify({"ok": False, "error": "Mã bản đọc không hợp lệ."}), 400
+
+    row = db.get_audio_preview(safe_id)
+    if not row:
+        return jsonify({"ok": False, "error": "Không tìm thấy bản đọc kịch bản."}), 404
+
+    master_path = row.get("master_audio_path")
+    if not master_path or not os.path.isfile(master_path):
+        return jsonify({"ok": False, "error": "File âm thanh không còn tồn tại trên hệ thống."}), 404
+
+    # Security: Verify path is strictly within PREVIEWS_DIR
+    real_master = os.path.abspath(master_path)
+    real_previews = os.path.abspath(config.PREVIEWS_DIR)
+    if not (real_master.startswith(real_previews + os.sep) or real_master == real_previews):
+        return jsonify({"ok": False, "error": "Đường dẫn file không hợp lệ."}), 403
+
+    voice_label = _safe_voice_label(row.get("voice_name"), row.get("voice_id"))
+    filename = f"{voice_label}_script_preview.wav"
+    return send_file(master_path, mimetype="audio/wav", as_attachment=True, download_name=filename)
+
+
+@app.route("/api/voices/approved/<voice_id>/sample")
+def approved_voice_sample(voice_id):
+    from . import preview_service
+    safe_vid = _sanitize_filename(voice_id)
+    if not re.match(r"^[A-Za-z0-9_\-]+$", safe_vid):
+        abort(400)
+    sample_path = preview_service.get_static_voice_sample(safe_vid)
+    if not sample_path or not os.path.isfile(sample_path):
+        abort(404)
+
+    real_sample = os.path.abspath(sample_path)
+    real_samples_dir = os.path.abspath(config.VOICE_SAMPLES_DIR)
+    if not (real_sample.startswith(real_samples_dir + os.sep) or real_sample == real_samples_dir):
+        abort(403)
+
+    as_attachment = request.args.get("download", "0") in ("1", "true", "yes")
+    if as_attachment:
+        voice_label = _safe_voice_label("", safe_vid)
+        return send_file(sample_path, mimetype="audio/wav", as_attachment=True, download_name=f"{voice_label}_sample.wav")
+    return send_file(sample_path, mimetype="audio/wav", conditional=True)
+
+
+@app.route("/api/voices/approved/<voice_id>/sample/download")
+def approved_voice_sample_download(voice_id):
+    from . import preview_service
+    safe_vid = _sanitize_filename(voice_id)
+    if not re.match(r"^[A-Za-z0-9_\-]+$", safe_vid):
+        return jsonify({"ok": False, "error": "Mã giọng không hợp lệ."}), 400
+
+    sample_path = preview_service.get_static_voice_sample(safe_vid)
+    if not sample_path or not os.path.isfile(sample_path):
+        return jsonify({"ok": False, "error": "Không tìm thấy mẫu giọng đọc."}), 404
+
+    real_sample = os.path.abspath(sample_path)
+    real_samples_dir = os.path.abspath(config.VOICE_SAMPLES_DIR)
+    if not (real_sample.startswith(real_samples_dir + os.sep) or real_sample == real_samples_dir):
+        return jsonify({"ok": False, "error": "Đường dẫn file không hợp lệ."}), 403
+
+    voice_label = _safe_voice_label("", safe_vid)
+    return send_file(sample_path, mimetype="audio/wav", as_attachment=True, download_name=f"{voice_label}_sample.wav")
+
+
+# --------------------------------------------------------------------------- #
 # Voice — ElevenLabs config auto-sync (V1.5.0)                                #
 # --------------------------------------------------------------------------- #
 # All browser-facing responses are SANITIZED: the API key / auth headers are
@@ -778,26 +1093,106 @@ def el_history_item(history_item_id):
 @app.route("/api/elevenlabs/voice-config/resolve", methods=["POST"])
 def el_resolve_config():
     """Resolve an explicit per-voice TTS config (Mode A auto / Mode B history /
-    Mode C manual). Returns the sanitized resolved config + provenance + hash,
-    or a fail-closed error (never silently substitutes). Also persists the
-    per-voice config so switching back to this voice remembers it."""
+    Mode C manual). V1.6.0: target_language is a first-class input; the resolver
+    applies the human-approved (voice, language) profile + live compatibility guard.
+    Returns the sanitized resolved config + provenance + hash, or a fail-closed /
+    incompatible / unsupported-language error (never silently substitutes). Also
+    persists the config keyed by (voice_id, language_code, resolver_policy)."""
     data = request.get_json(silent=True) or {}
     vid = (data.get("voice_id") or "").strip()
     mode = data.get("mode") or "auto_current"
+    tl = (data.get("target_language") or "").strip().lower() or None
     r = el.resolve_config(
         vid, mode=mode,
         history_item_id=data.get("history_item_id"),
         overrides=data.get("overrides"),
         voice_name=data.get("voice_name"),
         refresh=data.get("refresh", False),
+        target_language=tl,
+        resolver_policy=data.get("resolver_policy"),
     )
     if r.get("ok"):
         cfg = r["config"]
         try:
+            # Legacy per-voice remember (backward compat) + language-aware remember.
             db.save_voice_config(vid, cfg)
+            if tl:
+                db.save_voice_language_config(vid, tl,
+                                              cfg.get("resolver_policy") or mode, cfg)
         except Exception:
             pass
     return jsonify(r)
+
+
+@app.route("/api/language/detect", methods=["POST"])
+def language_detect():
+    """Lightweight script-language detection (no large AI dependency). Returns
+    {ok, language, confidence, source}. Vietnamese is recognized by diacritic
+    patterns AND linguistic markers; diacritics alone are not required (Vietnamese
+    may be typed without accents). Low confidence -> the UI must ask the user to
+    confirm rather than silently guess (handled client-side)."""
+    import re
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"ok": False, "error": "No text provided."}), 400
+    # Vietnamese diacritic range + common letter-only markers. Diacritics are a
+    # strong signal but not required (unaccented Vietnamese still has telltale
+    # words). We score both; confidence reflects how strong the signal is.
+    diacritic = re.findall(
+        "[ààảãáạăằẳẵắặâầẩẫấậđèẻẽéẹêềểễếệìỉĩíịòỏõóọôồổỗốộơờởỡớợùủũúụưừửữứựỳỷỹýỵ]"
+        , text.lower())
+    # A few very common Vietnamese function words (work even without accents).
+    vi_words = re.findall(r"\b(và|của|là|với|cho|này|mot|nhung|được|khong|đã|một)\b",
+                          text.lower(), re.IGNORECASE)
+    score = len(diacritic) + 2 * len(vi_words)
+    # English heuristic (Latin ascii without vi diacritics + common en words).
+    en_words = re.findall(r"\b(the|and|with|for|this|that|you|are|is|to|of)\b",
+                          text.lower())
+    if len(diacritic) >= 3 or score >= 6:
+        lang, conf, src = "vi", min(0.95, 0.5 + 0.05 * score), "SCRIPT_DIACRITIC"
+    elif len(en_words) >= 3 and len(diacritic) == 0:
+        lang, conf, src = "en", 0.7, "SCRIPT_COMMON_WORDS"
+    else:
+        lang, conf, src = "vi", 0.4, "DEFAULT_VI_LOW_CONFIDENCE"
+    return jsonify({"ok": True, "language": lang, "confidence": round(conf, 2),
+                    "source": src, "vi_diacritic_count": len(diacritic),
+                    "low_confidence": conf < 0.6})
+
+
+@app.route("/api/elevenlabs/profiles")
+def el_list_profiles():
+    """List human-approved voice/language model profiles (admin/advanced).
+    Generic mechanism — no hardcoding. No API key."""
+    return jsonify({"ok": True, "profiles": db.list_profiles()})
+
+
+@app.route("/api/elevenlabs/profiles", methods=["POST"])
+def el_save_profile():
+    """Save/replace a human-approved (voice, language) model profile. Admin only
+    (not exposed in the normal flow)."""
+    data = request.get_json(silent=True) or {}
+    vid = (data.get("voice_id") or "").strip()
+    lang = (data.get("language_code") or "").strip().lower()
+    mid = (data.get("preferred_model_id") or "").strip()
+    if not vid or not lang or not mid:
+        return jsonify({"ok": False, "error": "voice_id, language_code, preferred_model_id required."}), 400
+    db.save_profile(vid, lang, mid,
+                    selection_source=data.get("selection_source", "USER_MANUAL"),
+                    output_format=data.get("output_format"),
+                    notes=data.get("notes"))
+    return jsonify({"ok": True, "profile": db.get_profile(vid, lang)})
+
+
+@app.route("/api/elevenlabs/profiles", methods=["DELETE"])
+def el_delete_profile():
+    data = request.get_json(silent=True) or {}
+    vid = (data.get("voice_id") or "").strip()
+    lang = (data.get("language_code") or "").strip().lower()
+    if not vid or not lang:
+        return jsonify({"ok": False, "error": "voice_id and language_code required."}), 400
+    removed = db.delete_profile(vid, lang)
+    return jsonify({"ok": removed})
 
 
 @app.route("/api/elevenlabs/voice-config/<voice_id>")
@@ -882,9 +1277,36 @@ def script_split():
 # --------------------------------------------------------------------------- #
 # Render                                                                      #
 # --------------------------------------------------------------------------- #
+def _enforce_render_voice_allowlist(data: Dict[str, Any]):
+    """Normal production render API gate (Part 13): an ElevenLabs render must
+    use one of the approved production voices. Returns an error response dict if
+    the voice is not approved, else None. Edge TTS (free test) is unaffected.
+    Never silently substitutes an approved voice."""
+    provider = render_service._provider_for(data.get("tts_provider", render_service.ELEVENLABS))
+    if provider != render_service.ELEVENLABS:
+        return None  # Edge TTS test path is not an ElevenLabs render
+    vid = (data.get("voice_id") or "").strip()
+    if not voice_allowlist.is_approved_render_voice(vid):
+        return {"ok": False, "error": "VOICE_NOT_APPROVED_FOR_RENDER",
+                "approved_voice_ids": voice_allowlist.approved_voice_ids(),
+                "detail": "Giọng này không thuộc danh sách production. Không tự thay giọng."}, 403
+    return None
+
+
+@app.route("/api/voices/approved")
+def approved_voices():
+    """The two production-approved render voices with official metadata names +
+    profile status. Used by the normal Render Video voice selector. No API key."""
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify({"ok": True, "voices": voice_allowlist.list_approved_render_voices(refresh=refresh)})
+
+
 @app.route("/api/render/test", methods=["POST"])
 def render_test():
     data = request.get_json(silent=True) or {}
+    gate = _enforce_render_voice_allowlist(data)
+    if gate:
+        return jsonify(gate[0]), gate[1]
     return jsonify(render_service.create_test_job(
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("voice_meta"),
@@ -912,6 +1334,9 @@ def render_mouth_test():
 @app.route("/api/render", methods=["POST"])
 def render_full():
     data = request.get_json(silent=True) or {}
+    gate = _enforce_render_voice_allowlist(data)
+    if gate:
+        return jsonify(gate[0]), gate[1]
     return jsonify(render_service.create_full_jobs(
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("split_mode", "full"),
@@ -987,6 +1412,38 @@ def render_open_folder(job_id):
         except Exception:
             pass
     return jsonify({"ok": True})
+
+
+@app.route("/api/render/jobs/<job_id>/delete", methods=["POST"])
+def render_delete_route(job_id):
+    safe_id = _sanitize_filename(job_id)
+    res = render_service.delete_render(safe_id)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/api/render/jobs/<job_id>/restore", methods=["POST"])
+def render_restore_route(job_id):
+    safe_id = _sanitize_filename(job_id)
+    res = render_service.restore_render(safe_id)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/api/trash")
+def trash_list_route():
+    limit = int(request.args.get("limit", "100"))
+    deleted_avatars = avatar_service.list_trash_avatars()
+    deleted_jobs = db.list_trash_jobs(limit=limit)
+    return jsonify({"ok": True, "avatars": deleted_avatars, "jobs": deleted_jobs})
+
+
+@app.route("/api/activity-logs")
+def activity_logs_route():
+    limit = int(request.args.get("limit", "100"))
+    return jsonify({"ok": True, "logs": db.list_activity_logs(limit=limit)})
 
 
 # --------------------------------------------------------------------------- #

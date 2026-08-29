@@ -1,0 +1,18 @@
+Trang chủ
+SẴN SÀNG
+Tạo video
+Tạo Avatar
+Thư viện Avatar
+Lịch sử render
+Trạng thái hệ thống
+Cài đặt
+HỆ THỐNG SẴN SÀNG
+AI Avatar
+Sẵn sàng
+GPU
+GPU0 sẵn sàng · GPU1 sẵn sàng
+ElevenLabs
+Đã kết nối
+Edge TTS
+Khả dụng
+HÀNG ĐỢI RENDER
