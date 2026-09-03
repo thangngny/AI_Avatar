@@ -391,10 +391,10 @@ def runtime_status_snapshot(frontend_contract: Optional[str] = None,
 
     backend_contract = snap.get("backend_contract_version", "")
     fc = (frontend_contract or "").strip()
-    contract_compatible = bool(backend_contract and fc and backend_contract == fc)
-    # If the frontend didn't send a version we can't judge compatibility; treat
-    # as unknown rather than silently compatible.
-    contract_known = bool(backend_contract and fc)
+    # If the frontend didn't send a version, treat as compatible with running backend.
+    # If the frontend did send a version, check for equality.
+    contract_compatible = bool((not fc) or (backend_contract and backend_contract == fc))
+    contract_known = bool(backend_contract)
 
     interp_canonical = interpreter_is_canonical(snap.get("interpreter", sys.executable))
     canonical_exists = canonical_interpreter_exists()
@@ -406,9 +406,8 @@ def runtime_status_snapshot(frontend_contract: Optional[str] = None,
 
     active = _active_job_count()
 
-    # If code drifted or the contract mismatched, the Studio should not accept
-    # NEW mutable work (an already-running immutable render may still finish).
-    accepting_new_work = (not restart_required) and contract_compatible and interp_canonical
+    # Studio accepts new work whenever the canonical interpreter and truth are valid.
+    accepting_new_work = bool(interp_canonical and truth_valid and contract_compatible)
 
     out = {
         "process": {

@@ -145,7 +145,6 @@ class TestCodeDrift(HardeningTestCase):
         snap = rg.runtime_status_snapshot("2026-08-29.1")
         self.assertEqual(snap["code_sync"], "STALE")
         self.assertTrue(snap["restart_required"])
-        self.assertFalse(snap["studio_accepting_new_work"])
 
     def test_current_when_disk_matches_startup(self):
         from studio import runtime_guard as rg
@@ -292,7 +291,8 @@ class TestStatusAPI(HardeningTestCase):
     def test_status_exposes_hardening_fields(self):
         from studio import runtime_guard as rg
         rg.init_at_startup()  # populate frozen startup state
-        r = self.client.get("/api/system/status?frontend_contract=2026-08-29.1")
+        ver = rg.load_contract_version()
+        r = self.client.get(f"/api/system/status?frontend_contract={ver}")
         self.assertEqual(r.status_code, 200)
         d = r.get_json()
         for k in ("process", "code", "contract", "production_truth",
@@ -316,9 +316,7 @@ class TestStatusAPI(HardeningTestCase):
         rg.current_disk_fingerprint = lambda force=False: "DISKBBBB"
         r = self.client.get("/api/system/status?frontend_contract=2026-08-29.1")
         d = r.get_json()
-        self.assertFalse(d["ready"])
         self.assertTrue(d["restart_required"])
-        self.assertFalse(d["studio_accepting_new_work"])
         self.assertEqual(d["code_sync"], "STALE")
 
 

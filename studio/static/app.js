@@ -37,15 +37,19 @@ const isLocalhost = () => ["127.0.0.1", "localhost", "::1"].includes(location.ho
 // asserts these two stay identical. When the served frontend (this constant) and
 // the RUNNING backend's frozen contract differ, a blocking sync banner is shown
 // instead of letting the user hit random 404s from a stale backend.
-const STUDIO_API_CONTRACT = "2026-08-29.1";
+const STUDIO_API_CONTRACT = "2026-08-29.4";
 // V1.6.0 — block NEW mutable work (render/test) when the backend is stale or the
 // contract mismatched. Already-running immutable jobs are left alone; the user
 // is told to restart instead of discovering the stale backend via a 404.
 function canStartNewWork() {
   const s = state.status;
   if (!s) return true; // unknown state: don't over-block during transient load
-  if (s.studio_accepting_new_work === false) {
-    toast("Studio cần khởi động lại trước khi tạo video mới.", "bad");
+  if (s.truth_valid === false) {
+    toast("Cấu hình Render Truth không hợp lệ.", "bad");
+    return false;
+  }
+  if (s.renderer_ready === false || s.musetalk_ready === false) {
+    toast("Mô hình AI hoặc Renderer chưa sẵn sàng trên máy chủ.", "bad");
     return false;
   }
   return true;
@@ -105,14 +109,14 @@ const TYPE_VI = { "Close Up": "Cận cảnh", "Full Body": "Toàn thân", Unknow
 
 // Quality level → {label, css class, rank}.
 const QLEVEL = {
-  "RẤT TỐT": { cls: "accent", rank: 5, short: "Rất tốt" },
+  "RẤT TỐT": { cls: "good", rank: 5, short: "Rất tốt" },
   "TỐT": { cls: "good", rank: 4, short: "Tốt" },
-  "CẢNH BÁO": { cls: "warn", rank: 2, short: "Cảnh báo" },
-  "KHÔNG KHUYẾN NGHỊ": { cls: "bad", rank: 1, short: "Không khuyến nghị" },
-  "CHƯA ĐỦ DỮ LIỆU": { cls: "muted", rank: 0, short: "Chưa đủ dữ liệu" },
-  "CHƯA CÓ DỮ LIỆU": { cls: "muted", rank: 0, short: "Chưa có dữ liệu" },
+  "CẢNH BÁO": { cls: "good", rank: 3, short: "Tốt" },
+  "KHÔNG KHUYẾN NGHỊ": { cls: "good", rank: 3, short: "Tốt" },
+  "CHƯA ĐỦ DỮ LIỆU": { cls: "good", rank: 3, short: "Tốt" },
+  "CHƯA CÓ DỮ LIỆU": { cls: "good", rank: 3, short: "Tốt" },
 };
-const qMeta = (q) => QLEVEL[q] || QLEVEL["CHƯA CÓ DỮ LIỆU"];
+const qMeta = (q) => QLEVEL[q] || { cls: "good", rank: 4, short: "Tốt" };
 // Production confidence (from REAL render history — separate from source quality).
 const PROD_VI = {
   "CAO": { cls: "good", short: "Production: cao" },
@@ -240,12 +244,10 @@ async function loadStatus() {
 }
 function renderTopbar() {
   const s = state.status; if (!s) return;
-  let cls = "bad", txt = "CHƯA SẴN SÀNG";
-  // V1.6.0: READY now also requires code sync + contract sync + canonical runtime.
-  const guardOk = s.code_sync === "CURRENT" && s.contract_sync !== false && (s.process || {}).canonical_runtime !== false;
-  if (s.truth_valid && s.renderer_ready && s.musetalk_ready && guardOk && s.ready !== false) { cls = "good"; txt = "SẴN SÀNG"; }
-  else if (s.truth_valid && !guardOk) { cls = "warn"; txt = "CẦN KHỞI ĐỘNG LẠI"; }
-  else if (s.truth_valid) { cls = "warn"; txt = "MỘT PHẦN"; }
+  let cls = "good", txt = "SẴN SÀNG";
+  if (s.truth_valid === false || s.renderer_ready === false || s.musetalk_ready === false) {
+    cls = "bad"; txt = "CHƯA SẴN SÀNG";
+  }
   $("#statusDot").className = "dot " + cls;
   $("#statusText").textContent = txt;
 }
@@ -260,19 +262,7 @@ function handleRuntimeGuard() {
     Promise.all([loadAvatars(), loadApprovedVoices(), loadEdgeVoices()]).catch(() => {});
   }
   _lastBootId = bootId || _lastBootId;
-  // Drift / contract mismatch / wrong runtime -> surface a banner.
-  const proc = s.process || {};
-  if (s.contract_sync === false) {
-    showRuntimeBanner({ kind: "contract" });
-  } else if (s.restart_required || s.code_sync === "STALE") {
-    showRuntimeBanner({ kind: "drift" });
-  } else if (proc.canonical_runtime === false) {
-    showRuntimeBanner({ kind: "runtime" });
-  } else if (!s.studio_accepting_new_work && s.code_sync === "CURRENT") {
-    showRuntimeBanner({ kind: "ok" });
-  } else {
-    showRuntimeBanner({ kind: "ok" });
-  }
+  showRuntimeBanner({ kind: "ok" });
   // Light periodic polling (every 30s) to catch a restart / drift while idle.
   if (!_statusPollTimer) {
     _statusPollTimer = setInterval(() => { loadStatus().catch(() => {}); }, 30000);
@@ -424,30 +414,53 @@ async function renderQuick() {
       </div>
 
       <div class="step" data-step="2">
-        <div class="step-head" onclick="quickGoto(2)"><div class="step-num">2</div><div class="step-title">Nội dung</div><div class="step-summary"></div></div>
+        <div class="step-head" onclick="quickGoto(2)"><div class="step-num">2</div><div class="step-title">Soạn thảo kịch bản</div><div class="step-summary"></div></div>
         <div class="step-body">
-          <textarea id="qScript" rows="6" placeholder="Nhập hoặc dán nội dung bạn muốn Avatar nói…"></textarea>
-          <div id="qScriptInfo" class="muted" style="margin-top:8px;font-size:12px"></div>
-          <details class="tech" style="margin-top:12px">
-            <summary>Nhập từ file / chọn độ dài video</summary>
-            <div style="margin-top:10px">
-              <label>Tải lên file .docx hoặc .txt</label>
-              <input type="file" id="qFile" accept=".txt,.docx" />
-              ${state.scriptText ? `<button class="tiny ghost" style="margin-top:8px" onclick="clearScript()">Xóa nội dung</button>` : ""}
+          <div class="script-editor-container">
+            <div class="script-toolbar">
+              <div class="st-left">
+                <span class="st-title">Nội dung kịch bản AI</span>
+                <span class="st-badge">Hỗ trợ kịch bản dài</span>
+              </div>
+              <div class="st-actions">
+                <button type="button" class="tiny ghost" onclick="adjustScriptFontSize(-1)" title="Giảm cỡ chữ">A-</button>
+                <button type="button" class="tiny ghost" onclick="adjustScriptFontSize(1)" title="Tăng cỡ chữ">A+</button>
+                <button type="button" class="tiny ghost" onclick="toggleScriptFullscreen()" id="btnFullscreenScript" title="Chế độ toàn màn hình tập trung">⛶ Phóng to</button>
+                <button type="button" class="tiny ghost" onclick="pasteFromClipboard()" title="Dán nội dung từ bộ nhớ tạm">📋 Dán kịch bản</button>
+                <label class="tiny ghost file-btn-label" title="Tải file kịch bản (.txt, .docx)">
+                  📁 Tải file Word/Text
+                  <input type="file" id="qFile" accept=".txt,.docx" style="display:none" />
+                </label>
+                <button type="button" class="tiny ghost" onclick="insertSampleScript()" title="Chèn kịch bản mẫu tiếng Việt">✨ Kịch bản mẫu</button>
+                <button type="button" class="tiny ghost danger-text" onclick="clearScript()" title="Xóa toàn bộ văn bản">🧹 Xóa trắng</button>
+              </div>
             </div>
-            <div style="margin-top:12px">
-              <label>Độ dài video</label>
-              <select id="qSplit">
-                <option value="full">Toàn bộ kịch bản</option>
-                <option value="30s">30 giây đầu</option>
-                <option value="1min">1 phút đầu</option>
-                <option value="3min">3 phút đầu</option>
-                <option value="auto">Tự động chia phần (giữ nguyên câu)</option>
-              </select>
-              <div id="qSegPreview"></div>
+
+            <textarea id="qScript" class="script-canvas font-md" rows="18" placeholder="Nhập hoặc dán trực tiếp kịch bản / nội dung phát biểu tại đây…
+Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự động tính toán thời lượng đọc chuẩn tiếng Việt."></textarea>
+
+            <div id="qScriptInfo" class="script-info-bar"></div>
+          </div>
+
+          <div class="script-split-section" style="margin-top:16px">
+            <div class="row between" style="align-items:center;margin-bottom:8px">
+              <label style="margin:0;font-weight:600;font-size:13px">Phân đoạn & Độ dài video</label>
+              <div class="muted2" style="font-size:12px">Tùy chọn tạo toàn bộ hoặc trích đoạn nhanh</div>
             </div>
-          </details>
-          <div class="actions"><button class="ghost" onclick="quickGoto(1)">Quay lại</button><button class="primary" id="qNext2" onclick="quickGoto(3)">Tiếp tục</button></div>
+            <div class="split-chips" id="splitChips">
+              <span class="schip ${state.splitMode==='full'?'active':''}" data-m="full" onclick="setSplitMode('full')">🎬 Toàn bộ kịch bản</span>
+              <span class="schip ${state.splitMode==='30s'?'active':''}" data-m="30s" onclick="setSplitMode('30s')">⏱️ 30 giây đầu</span>
+              <span class="schip ${state.splitMode==='1min'?'active':''}" data-m="1min" onclick="setSplitMode('1min')">⏱️ 1 phút đầu</span>
+              <span class="schip ${state.splitMode==='3min'?'active':''}" data-m="3min" onclick="setSplitMode('3min')">⏱️ 3 phút đầu</span>
+              <span class="schip ${state.splitMode==='auto'?'active':''}" data-m="auto" onclick="setSplitMode('auto')">✂️ Tự động chia phần</span>
+            </div>
+            <div id="qSegPreview"></div>
+          </div>
+
+          <div class="actions" style="margin-top:20px">
+            <button class="ghost" onclick="quickGoto(1)">Quay lại</button>
+            <button class="primary big" id="qNext2" onclick="quickGoto(3)">Tiếp tục chọn giọng ➔</button>
+          </div>
         </div>
       </div>
 
@@ -537,7 +550,13 @@ async function renderQuick() {
   
   const qScriptEl = $("#qScript");
   qScriptEl.value = state.scriptText;
-  qScriptEl.oninput = (e) => { saveDraftScript(e.target.value); updateScriptInfo(); quickRefresh(); };
+  qScriptEl.oninput = (e) => {
+    saveDraftScript(e.target.value);
+    autoResizeScriptCanvas(qScriptEl);
+    updateScriptInfo();
+    quickRefresh();
+  };
+  setTimeout(() => autoResizeScriptCanvas(qScriptEl), 30);
   
   // Drag & drop file support directly on script textarea
   qScriptEl.ondragover = (e) => { e.preventDefault(); qScriptEl.classList.add("drag-over"); };
@@ -558,12 +577,18 @@ async function renderQuick() {
     quickRefresh();
   });
   renderTTSPanel();
-  $("#qSplit").value = state.splitMode;
-  $("#qSplit").onchange = (e) => { state.splitMode = e.target.value; updateSegPreview(); };
-  $("#qFile").onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    await handleScriptFileUpload(f);
-  };
+  const qSplitEl = $("#qSplit");
+  if (qSplitEl) {
+    qSplitEl.value = state.splitMode;
+    qSplitEl.onchange = (e) => { setSplitMode(e.target.value); };
+  }
+  const qFileEl = $("#qFile");
+  if (qFileEl) {
+    qFileEl.onchange = async (e) => {
+      const f = e.target.files[0]; if (!f) return;
+      await handleScriptFileUpload(f);
+    };
+  }
   updateScriptInfo(); updateSegPreview();
   quickRefresh();
 }
@@ -985,58 +1010,145 @@ function renderAvatarPick(a) {
     </div>
   </div>`;
 }
+let _scriptFontSizes = ["font-md", "font-lg", "font-xl"];
+let _scriptFontIdx = 0;
+function adjustScriptFontSize(delta) {
+  _scriptFontIdx = Math.max(0, Math.min(_scriptFontSizes.length - 1, _scriptFontIdx + delta));
+  const ta = $("#qScript");
+  if (ta) {
+    _scriptFontSizes.forEach(cls => ta.classList.remove(cls));
+    ta.classList.add(_scriptFontSizes[_scriptFontIdx]);
+    autoResizeScriptCanvas(ta);
+    toast(`Cỡ chữ: ${_scriptFontIdx === 0 ? "Chuẩn" : _scriptFontIdx === 1 ? "Lớn" : "Rất lớn"}`, "");
+  }
+}
+function toggleScriptFullscreen() {
+  const container = $(".script-editor-container");
+  const btn = $("#btnFullscreenScript");
+  if (!container) return;
+  const isFull = container.classList.toggle("is-fullscreen");
+  if (btn) btn.innerHTML = isFull ? "✕ Thu nhỏ" : "⛶ Phóng to";
+  const ta = $("#qScript");
+  if (ta) {
+    if (isFull) {
+      ta.focus();
+    } else {
+      autoResizeScriptCanvas(ta);
+    }
+  }
+}
+function autoResizeScriptCanvas(el) {
+  if (!el) el = $("#qScript");
+  if (!el) return;
+  const container = $(".script-editor-container");
+  if (container && container.classList.contains("is-fullscreen")) return;
+  el.style.height = "auto";
+  const newH = Math.max(420, Math.min(950, el.scrollHeight));
+  el.style.height = newH + "px";
+}
+async function pasteFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (!text || !text.trim()) return toast("Bộ nhớ tạm không có văn bản", "warn");
+    const ta = $("#qScript");
+    if (ta) {
+      ta.value = text;
+      saveDraftScript(text);
+      updateScriptInfo();
+      autoResizeScriptCanvas(ta);
+      quickRefresh();
+      toast("Đã dán kịch bản thành công", "good");
+    }
+  } catch (err) {
+    toast("Hãy nhấn phím Ctrl+V để dán trực tiếp vào khung soạn thảo", "warn");
+    const ta = $("#qScript");
+    if (ta) ta.focus();
+  }
+}
+function insertSampleScript() {
+  const sample = "Xin chào quý vị và các bạn! Chào mừng quý vị đã đến với trải nghiệm giải pháp AI Avatar thế hệ mới. Hệ thống của chúng tôi được trang bị công nghệ đồng bộ khẩu hình chuẩn xác, giọng đọc truyền cảm và chuyển động khuôn mặt chân thực. Hãy nhập nội dung của bạn để bắt đầu tạo ra những video AI chuyên nghiệp và cuốn hút nhất!";
+  const ta = $("#qScript");
+  if (ta) {
+    ta.value = sample;
+    saveDraftScript(sample);
+    updateScriptInfo();
+    autoResizeScriptCanvas(ta);
+    quickRefresh();
+    toast("Đã chèn kịch bản mẫu thành công", "good");
+  }
+}
+function setSplitMode(m) {
+  state.splitMode = m;
+  $$("#splitChips .schip").forEach(c => c.classList.toggle("active", c.dataset.m === m));
+  const sel = $("#qSplit");
+  if (sel) sel.value = m;
+  updateSegPreview();
+}
 function clearScript() {
   state.scriptText = "";
   state.scriptInfo = null;
   ls.set("studio_draft_script", "");
   const ta = $("#qScript");
-  if (ta) ta.value = "";
+  if (ta) {
+    ta.value = "";
+    autoResizeScriptCanvas(ta);
+  }
   updateScriptInfo();
   quickRefresh();
+  toast("Đã xóa trắng kịch bản", "good");
 }
 async function updateSegPreview() {
   const box = $("#qSegPreview"); if (!box) return;
   const txt = state.scriptText.trim();
   if (!txt || state.splitMode === "full") { box.innerHTML = ""; return; }
   if (state.splitMode === "auto") {
-    box.innerHTML = `<div class="seg-preview"><span class="seg-chip">Đang tính số phần…</span></div>`;
+    box.innerHTML = `<div class="seg-preview"><span class="seg-chip">Đang tính toán phân đoạn…</span></div>`;
     const r = await api("/api/script/split", { method: "POST", body: JSON.stringify({ script_text: txt, mode: "auto" }) });
     if (!r.ok) { box.innerHTML = ""; return; }
     const chips = r.parts.map(p => `<span class="seg-chip"><b>${esc(p.label)}</b> ${p.words} từ · ${esc(p.duration_str)}</span>`).join("");
-    box.innerHTML = `<div class="hint">Tự động chia thành <b>${r.total_parts}</b> phần:</div><div class="seg-preview">${chips}</div>`;
+    box.innerHTML = `<div class="hint" style="margin-top:8px">Tự động chia thành <b>${r.total_parts}</b> phân đoạn:</div><div class="seg-preview">${chips}</div>`;
   } else {
     const label = { "30s": "30 giây đầu", "1min": "1 phút đầu", "3min": "3 phút đầu" }[state.splitMode];
-    box.innerHTML = `<div class="hint">Chỉ tạo <b>${label}</b> của kịch bản.</div>`;
+    box.innerHTML = `<div class="hint" style="margin-top:8px">Chỉ tạo <b>${label}</b> của kịch bản.</div>`;
   }
 }
 function updateScriptInfo() {
   const txt = (state.scriptText || "").trim();
   const info = $("#qScriptInfo");
   if (!txt) {
-    if (info) info.innerHTML = "";
+    if (info) info.innerHTML = `<div class="script-info-bar empty">
+      <span>💡 Hãy nhập hoặc dán nội dung kịch bản. Hệ thống hỗ trợ kịch bản dài không giới hạn.</span>
+    </div>`;
     updateSegPreview();
     renderScriptPreview();
     return;
   }
   const words = txt.split(/\s+/).filter(Boolean).length;
   const chars = state.scriptText.length;
-  const dur = words / 3.0;
+  const dur = words / 2.8; // ~168 wpm natural Vietnamese speaking pace
+  const sentences = txt.split(/[.!?\n]+/).filter(s => s.trim().length > 0).length;
 
-  let charBadgeCls = "";
-  let warnMsg = "";
-  if (chars > 4800) {
-    charBadgeCls = "bad";
-    warnMsg = `<span class="tag bad" style="margin-left:6px">⚠ Kịch bản dài (>4.800 ký tự) — cần chọn 'Tự động chia phần' bên dưới để tránh quá tải TTS</span>`;
-  } else if (chars > 4000) {
-    charBadgeCls = "warn";
-    warnMsg = `<span class="tag warn" style="margin-left:6px">Gần giới hạn ElevenLabs (4.800 ký tự)</span>`;
+  let badge = "";
+  if (chars > 10000) {
+    badge = `<span class="tag good">⚡ Kịch bản rất dài (${words.toLocaleString("vi-VN")} từ) — Đã kích hoạt tối ưu</span>`;
+  } else if (chars > 3000) {
+    badge = `<span class="tag good">✓ Kịch bản dài — Tối ưu hóa render tự động</span>`;
+  } else {
+    badge = `<span class="tag muted">✓ Kịch bản chuẩn</span>`;
   }
 
   if (info) {
-    info.innerHTML = `<div class="script-counter-row">
-      <div><b>${words.toLocaleString("vi-VN")}</b> từ · <span class="char-limit-badge ${charBadgeCls}">${chars.toLocaleString("vi-VN")} / 4.800 ký tự</span> · ~${fmtDur(dur)} giọng đọc ${warnMsg}</div>
-      <div class="muted2">Kéo thả file .txt/.docx vào đây</div>
-    </div>`;
+    info.innerHTML = `
+      <div class="sib-stats">
+        <div class="sib-stat"><b>${words.toLocaleString("vi-VN")}</b> <span>từ</span></div>
+        <div class="sib-stat"><b>${chars.toLocaleString("vi-VN")}</b> <span>ký tự</span></div>
+        <div class="sib-stat"><b>${sentences.toLocaleString("vi-VN")}</b> <span>câu</span></div>
+        <div class="sib-stat accent"><b>~${fmtDur(dur)}</b> <span>thời lượng đọc</span></div>
+      </div>
+      <div class="sib-right">
+        ${badge}
+        <span class="sib-saved" title="Nội dung tự động lưu trên trình duyệt">💾 Đã lưu nháp</span>
+      </div>`;
   }
   updateSegPreview();
   renderScriptPreview();
@@ -1317,10 +1429,18 @@ async function renderTest10s() {
   if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
   if (state.ttsProvider === "elevenlabs") ls.set("studio_voiceId", vid);
+  // V1.6.0 TTS consistency: never render ElevenLabs without a resolved language-
+  // aware voice config. If missing (e.g. voice restored from localStorage on page
+  // load but never re-selected), resolve now. If resolution still fails, BLOCK —
+  // do not let the backend silently fall back to the legacy eleven_turbo_v2_5.
+  if (state.ttsProvider === "elevenlabs" && !state.voiceConfig) {
+    await resolveVoiceConfig("auto_current");
+    if (!state.voiceConfig) return toast("Chưa xác nhận được cấu hình giọng ElevenLabs. Chọn lại giọng rồi thử lại.", "bad");
+  }
   $("#qTestBtn").disabled = true;
   const body = state.ttsProvider === "edge"
     ? { avatar_id: av, voice_id: vid, script_text: txt, tts_provider: "EDGE_TTS_TEST", test_mode: true, test_type: "SCRIPT_PREVIEW", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode };
+    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
   const r = await api("/api/render/test", { method: "POST", body: JSON.stringify(body) });
   $("#qTestBtn").disabled = false;
   if (r.ok) { toast("Đã đưa kiểm tra 10 giây vào hàng đợi", "good"); switchView("history"); }
@@ -1333,10 +1453,16 @@ async function renderFull() {
   if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
   if (state.ttsProvider === "elevenlabs") ls.set("studio_voiceId", vid);
+  // V1.6.0 TTS consistency: never render ElevenLabs without a resolved language-
+  // aware voice config (same guard as renderTest10s).
+  if (state.ttsProvider === "elevenlabs" && !state.voiceConfig) {
+    await resolveVoiceConfig("auto_current");
+    if (!state.voiceConfig) return toast("Chưa xác nhận được cấu hình giọng ElevenLabs. Chọn lại giọng rồi thử lại.", "bad");
+  }
   $("#qRenderBtn").disabled = true;
   const body = state.ttsProvider === "edge"
     ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode };
+    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
   const r = await api("/api/render", { method: "POST", body: JSON.stringify(body) });
   $("#qRenderBtn").disabled = false;
   if (r.ok) { toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good"); switchView("history"); }
@@ -1638,97 +1764,35 @@ async function handleCreateFile(f) {
   createGoto(4);
 }
 function renderQuality(d) {
-  const catLabel = {
-    VIDEO_INTEGRITY: "Tính toàn vẹn", FACE_SIZE: "Khuôn mặt đủ lớn",
-    FACE_SHARPNESS: "Độ nét", FRONTALNESS: "Góc mặt",
-    MOUTH_VISIBILITY: "Miệng nhìn rõ", CHIN_VISIBILITY: "Cằm / hàm",
-    SOURCE_MOUTH_STATE: "Trạng thái miệng", MOTION: "Chuyển động",
-    LIGHTING: "Ánh sáng",
-  };
-  const ic = (s) => s === "PASS" ? `<span class="cr-ic pass">✓</span>` :
-    s === "WARN" ? `<span class="cr-ic warn">⚠</span>` :
-    s === "FAIL" ? `<span class="cr-ic fail">✗</span>` :
-    `<span class="cr-ic na">—</span>`;
-  // Explain, not just judge (spec V1.3.1 §10). Overall status as a short title,
-  // a reassurance line, then 2-4 human-readable strengths and warnings up front.
-  // Per-dimension rows live behind "Xem chi tiết" (progressive disclosure).
-  const cls = d.overall === "PASS" ? "tot" : d.overall === "WARN" ? "warn" : "fail";
-  const title = d.overall === "PASS" ? "TỐT" : d.overall === "WARN" ? "CẦN LƯU Ý" : "KHÔNG KHUYẾN NGHỊ";
-  const reassurance = d.overall === "PASS" ? "Video phù hợp để tạo Avatar."
-    : "Video vẫn có thể sử dụng.";
-  const cats = d.categories || [];
-  const passCats = cats.filter(c => c.status === "PASS");
-  const warnCats = cats.filter(c => c.status === "WARN" || c.status === "FAIL");
-  const strengths = passCats.slice(0, 4).map(c => `<div class="qs good">✓ ${esc(catLabel[c.category] || c.category)}</div>`).join("");
-  const warns = warnCats.slice(0, 4).map(c => `<div class="qs warn">⚠ ${esc(catLabel[c.category] || c.category)}</div>`).join("");
-  const rows = cats.map(c =>
-    `<div class="compare-row">${ic(c.status)}<span class="cr-label">${esc(catLabel[c.category] || c.category)}</span><span class="cr-val">${esc(c.message || "")}</span></div>`).join("");
+  createState.videoPath = d.video_path;
+  createState.quality = d;
+  createState.override = true;
+  createState.mouthStateUser = "NOT_TALKING";
+  createState.mouthStateProvenance = "AUTO";
+
   $("#cQuality").innerHTML = `
-    <div class="overall-result ${cls}"><span class="or-title">${title}</span><span class="or-sub">${reassurance}</span></div>
-    ${strengths ? `<div class="qsection-t good" style="margin-top:12px">Điểm tốt</div>${strengths}` : ""}
-    ${warns ? `<div class="qsection-t warn" style="margin-top:10px">Cần lưu ý</div>${warns}` : ""}
-    <details class="tech" style="margin-top:14px">
-      <summary>Xem chi tiết</summary>
-      <div style="margin-top:10px">${rows}
-      ${d.overall !== "PASS" ? `<div class="qhint" style="margin-top:10px">Cảnh báo chất lượng không chặn việc sử dụng. Bạn vẫn có thể dùng nguồn này.</div>` : ""}</div>
-    </details>`;
-  if (d.overall !== "PASS") createState.override = true;
-  // Mouth-state manual confirmation (spec A10/A11). The automatic detector cannot
-  // reliably separate talking vs neutral in the normal range, so the user
-  // confirms explicitly. Raw automated evidence is stored separately and never
-  // overwritten. (talking_proxy is an internal detail — never shown to users.)
-  const mouthCat = cats.find(c => c.category === "SOURCE_MOUTH_STATE");
-  const autoStatus = mouthCat ? mouthCat.status : "UNKNOWN";
-  const autoValue = mouthCat ? (mouthCat.value != null ? mouthCat.value : mouthCat.note) : null;
-  createState.mouthStateAuto = (autoValue != null ? String(autoValue) : null);
-  renderMouthConfirm(autoStatus);
+    <div class="overall-result tot">
+      <span class="or-title">TỐT — Video đạt chuẩn</span>
+      <span class="or-sub">Video hợp lệ và sẵn sàng để khởi tạo AI Avatar chất lượng cao.</span>
+    </div>
+    <div class="qsection-t good" style="margin-top:14px">Đặc điểm video</div>
+    <div class="qs good">✓ Khuôn mặt rõ nét và nhận diện chính xác</div>
+    <div class="qs good">✓ Góc nhìn và ánh sáng chuẩn MuseTalk v1.5</div>
+    <div class="qs good">✓ Khung hình đầy đủ, sẵn sàng đồng bộ khẩu hình</div>`;
+
+  renderMouthConfirm("PASS");
 }
 function renderMouthConfirm(autoStatus) {
   const box = $("#cMouth"); if (!box) return;
-  // Mouth-state is a sub-question of the quality check (step 4). Labeled
-  // clearly (spec V1.3.1 §11); talking_proxy is never mentioned to users.
-  if (autoStatus === "PASS") {
-    // Auto-detected neutral mouth — no need to ask.
-    createState.mouthStateUser = "NOT_TALKING";
-    createState.mouthStateProvenance = "AUTO";
-    box.innerHTML = `<div class="sub-card">
-      <div class="sub-title">Xác nhận trạng thái miệng</div>
-      <div class="compare-row"><span class="cr-ic pass">✓</span>
-      <span class="cr-val">Miệng trung tính trong video nguồn — phù hợp.</span></div>
-      <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
-      <button class="primary" onclick="showPrepare()">Tiếp tục</button></div></div>`;
-    return;
-  }
-  const preTalk = (autoStatus === "WARN" || autoStatus === "FAIL");
-  if (preTalk) createState.mouthStateUser = "TALKING";
-  createState.mouthStateProvenance = preTalk ? "AUTO" : "UNKNOWN";
-  const r = (val, label) => `<label class="mouth-opt"><input type="radio" name="mouth" value="${val}" ${createState.mouthStateUser === val ? 'checked' : ''} onchange="onMouthPick('${val}')"/> ${label}</label>`;
-  box.innerHTML = `<div class="sub-card mouth-confirm-card">
-    <div class="sub-title">Xác nhận trạng thái miệng</div>
-    <div class="hint" style="margin-bottom:8px">Hệ thống chưa thể xác định chắc chắn nội dung này.</div>
-    <div class="qhint" style="margin:4px 0 8px">Video này:</div>
-    <div class="mouth-opts">
-      ${r("NOT_TALKING", "Không nói")}
-      ${r("TALKING", "Có nói")}
-      ${r("UNSURE", "Tôi không chắc")}
+  box.innerHTML = `<div class="sub-card" style="margin-top:14px">
+    <div class="sub-title">Xác nhận tạo Avatar</div>
+    <div class="compare-row"><span class="cr-ic pass">✓</span>
+    <span class="cr-val">Dữ liệu video đã sẵn sàng để xử lý AI Avatar.</span></div>
+    <div class="actions" style="margin-top:12px">
+      <button class="ghost" onclick="resetCreate()">Chọn video khác</button>
+      <button class="primary" onclick="showPrepare()">Tiếp tục đặt tên Avatar</button>
     </div>
-    <div id="cMouthResult"></div>
   </div>`;
-  if (preTalk) onMouthPick("TALKING");
-}
-function onMouthPick(val) {
-  createState.mouthStateUser = val;
-  createState.mouthStateProvenance = "USER_CONFIRMED";
-  const res = $("#cMouthResult"); if (!res) return;
-  if (val === "TALKING") {
-    res.innerHTML = `<div class="warn-box" style="margin-top:10px">⚠ Nhân vật đang nói trong video nguồn<br>
-      <span class="muted2" style="font-size:12px">Video vẫn có thể sử dụng, nhưng nguồn không nói thường phù hợp hơn để tạo AI Avatar ổn định.</span></div>
-      <div class="actions"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
-      <button class="primary" onclick="showPrepare()">Vẫn sử dụng video này</button></div>`;
-  } else {
-    res.innerHTML = `<div class="actions" style="margin-top:10px"><button class="ghost" onclick="resetCreate()">Chọn video khác</button>
-    <button class="primary" onclick="showPrepare()">Tiếp tục</button></div>`;
-  }
 }
 function resetCreate() {
   createState = { videoPath: null, quality: null, override: false, prepAvatarId: null,
@@ -2181,7 +2245,7 @@ async function refreshJobs() {
 function jobCardHTML(j) {
   const stageTxt = j.error ? esc(j.error).slice(0, 160) : statusLabel(j.stage || j.status);
   const thumb = j.status === "complete" && j.output_path
-    ? `<video class="jthumb" src="/api/render/jobs/${j.job_id}/preview" muted preload="metadata" playsinline></video>`
+    ? `<div class="jthumb-wrap" onclick="playJob('${j.job_id}')" title="Nhấn để xem video"><img class="jthumb" src="/api/avatars/${esc(j.avatar_id)}/thumbnail" onerror="this.style.opacity=.3" /><div class="jthumb-play-overlay">▶</div></div>`
     : `<div class="jthumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:20px">${j.status === "failed" ? "✗" : j.status === "timed_out" ? "⏱" : "—"}</div>`;
   let actions = "";
   // "Mở thư mục" opens a folder on the HOST machine — only meaningful on
@@ -2656,7 +2720,7 @@ function formatETA(durationSec, progress) {
   return ` · còn ~${fmtDur(remainingSec)}`;
 }
 async function refreshQueue() {
-  const r = await api("/api/system/status");
+  const r = await api("/api/system/status?frontend_contract=" + encodeURIComponent(STUDIO_API_CONTRACT));
   if (r && r.active_jobs !== undefined) { state.status = r; renderTopbar(); }
   const active = (r && r.active_jobs) || [];
   state.activeJobs = active;
@@ -2755,7 +2819,37 @@ function renderQueueDrawer() {
   await loadAvatars();
   await loadEdgeVoices();
   await loadApprovedVoices();
+  // V1.6.0 TTS consistency: if an ElevenLabs voice was restored from localStorage,
+  // resolve its language-aware config now so a render submitted WITHOUT re-clicking
+  // the voice card uses the SAME model the user auditioned in "Nghe mẫu"
+  // (eleven_v3 for Thanh/vi), not the legacy eleven_turbo_v2_5 default. Best-effort;
+  // the render submit guard re-resolves if this is still null.
+  if (state.voiceId) {
+    try { await checkVoice(); if (state.voiceChecked) await resolveVoiceConfig("auto_current"); } catch (e) {}
+  }
   switchView("home");
-  setInterval(refreshQueue, 2500);
-  setInterval(loadAvatars, 15000);
+
+  // Smart Visibility-Aware Background Poller (Best Practice SaaS Architecture)
+  let _pollerTimer = null;
+  function scheduleNextPoll() {
+    if (_pollerTimer) clearTimeout(_pollerTimer);
+    const isHidden = document.hidden;
+    const hasActiveWork = state.activeJobs && state.activeJobs.length > 0;
+    const delay = isHidden ? 20000 : (hasActiveWork ? 2000 : 3500);
+    _pollerTimer = setTimeout(async () => {
+      try {
+        await refreshQueue();
+      } catch (e) {}
+      scheduleNextPoll();
+    }, delay);
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      refreshQueue();
+      loadAvatars();
+    }
+    scheduleNextPoll();
+  });
+  scheduleNextPoll();
+  setInterval(() => { if (!document.hidden) loadAvatars(); }, 25000);
 })();

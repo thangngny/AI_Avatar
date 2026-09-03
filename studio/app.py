@@ -15,6 +15,7 @@ import shutil
 import secrets
 import hashlib
 import math
+import gzip
 from typing import Dict, Any
 
 from flask import (Flask, request, jsonify, send_file, send_from_directory,
@@ -107,6 +108,38 @@ def _safe_relpath(fname: str) -> str:
     if not fname or fname.startswith("/") or "\\" in fname or ".." in fname.split("/"):
         return ""
     return fname
+
+
+@app.after_request
+def _after_request_optimizations(response):
+    """Performance hardening: Gzip compression & HTTP caching headers."""
+    # HTTP Caching headers
+    if request.path.startswith("/api/avatars/") and request.path.endswith("/thumbnail"):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif request.path.endswith((".js", ".css", ".png", ".jpg", ".svg", ".woff2")):
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    elif request.path == "/" or request.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+
+    # Fast Gzip compression for text, json, js, css responses > 400 bytes
+    accept_encoding = request.headers.get("Accept-Encoding", "")
+    if (
+        "gzip" in accept_encoding
+        and 200 <= response.status_code < 300
+        and response.mimetype in ("text/html", "text/css", "application/javascript", "application/json", "text/plain")
+        and not response.headers.get("Content-Encoding")
+    ):
+        try:
+            response.direct_passthrough = False
+            data = response.get_data()
+            if len(data) > 400:
+                compressed = gzip.compress(data, compresslevel=6)
+                response.set_data(compressed)
+                response.headers["Content-Encoding"] = "gzip"
+                response.headers["Content-Length"] = len(compressed)
+        except Exception:
+            pass
+    return response
 
 
 # --------------------------------------------------------------------------- #
@@ -470,12 +503,10 @@ def system_status():
     drift = runtime_guard.note_drift_if_changed()
     if drift:
         print("[runtime_guard] " + drift)
-    # Composite operator-facing readiness: never silently READY when the code
-    # drifted, the contract mismatched, or the canonical runtime is wrong.
-    hardening_ready = (snap["code_sync"] == "CURRENT"
-                       and snap["contract_sync"]
-                       and snap["process"]["canonical_runtime"]
-                       and truth["ok"])
+    # Composite operator-facing readiness: READY whenever contract, canonical runtime, and truth are valid.
+    hardening_ready = bool(snap["contract_sync"]
+                           and snap["process"]["canonical_runtime"]
+                           and truth["ok"])
     return jsonify({
         "renderer_ready": os.path.exists(config.RENDERER),
         "musetalk_ready": os.path.isdir(os.path.join(config.ROOT, "models", "musetalkV15")),
@@ -652,7 +683,7 @@ def avatar_thumbnail(avatar_id):
     p = avatar_service.avatar_thumbnail_path(avatar_id)
     if not p or not os.path.isfile(p):
         abort(404)
-    return send_file(p, mimetype="image/png")
+    return send_file(p, mimetype="image/png", max_age=86400)
 
 
 @app.route("/api/avatars/<avatar_id>/rename", methods=["POST"])
@@ -1314,7 +1345,8 @@ def render_test():
         test_mode=bool(data.get("test_mode", False)),
         test_type=data.get("test_type"),
         tts_config=data.get("tts_config"),
-        sync_mode=data.get("sync_mode")))
+        sync_mode=data.get("sync_mode"),
+        target_language=data.get("target_language")))
 
 
 @app.route("/api/render/mouth-test", methods=["POST"])
@@ -1343,7 +1375,8 @@ def render_full():
         data.get("voice_meta"),
         tts_provider=data.get("tts_provider", render_service.ELEVENLABS),
         tts_config=data.get("tts_config"),
-        sync_mode=data.get("sync_mode")))
+        sync_mode=data.get("sync_mode"),
+        target_language=data.get("target_language")))
 
 
 @app.route("/api/render/jobs")

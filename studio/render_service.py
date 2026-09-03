@@ -25,7 +25,7 @@ import shutil
 import subprocess
 import threading
 import uuid
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 from . import config, db, gpu_service
 from . import elevenlabs_client as el
@@ -311,18 +311,63 @@ def _provider_for(tts_provider: Optional[str]) -> str:
     return EDGE_TTS_TEST if tts_provider == EDGE_TTS_TEST else ELEVENLABS
 
 
+def _resolve_tts_config_for_submission(voice_id: str,
+                                       tts_config: Optional[Dict[str, Any]],
+                                       target_language: Optional[str]
+                                       ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """V1.6.0 TTS consistency guard (defense-in-depth).
+
+    Guarantees an ElevenLabs render job ALWAYS carries a resolved, language-aware
+    tts_config snapshot — the SAME config the Preview/Script-Preview path resolves
+    (eleven_v3 for Thanh/vi via the HUMAN_BENCHMARK_APPROVED profile). Without this,
+    a job submitted with tts_config=None silently falls into the legacy
+    ``eleven_turbo_v2_5`` branch of generate_master_audio (hardcoded model, 16 kHz,
+    no language_code) — a different model than the voice the user auditioned in
+    "Listen to a sample". That silent model fallback is the preview-vs-render
+    voice divergence root cause.
+
+    Behavior:
+      * Caller supplied a resolved tts_config -> trust it (immutable snapshot).
+      * Caller supplied None -> resolve server-side via el.resolve_config(
+        voice_id, target_language), exactly like preview_service does.
+      * Resolution fails (incompatible / unsupported / API down) -> return an
+        error so the caller FAILS CLOSED instead of queuing a wrong-model job.
+        Never silently substitutes the legacy Studio default.
+
+    Returns (tts_config_or_None, error_response_or_None). Edge TTS never calls
+    this (it is a separate, explicit provider)."""
+    if tts_config:
+        return tts_config, None
+    tl = (target_language or "vi").strip().lower() or "vi"
+    try:
+        res = el.resolve_config(voice_id, mode="auto_current", target_language=tl)
+    except Exception as e:
+        return None, {"ok": False, "fail_closed": True,
+                      "error": f"Không thể xác định cấu hình giọng ElevenLabs cho render: {e}"}
+    if not res.get("ok"):
+        return None, {"ok": False, "fail_closed": True,
+                      "error": res.get("error") or "Không thể xác nhận cấu hình giọng ElevenLabs để render.",
+                      "incompatible": res.get("incompatible"),
+                      "unsupported_language": res.get("unsupported_language")}
+    return res["config"], None
+
+
 def create_test_job(avatar_id: str, voice_id: str, script_text: str,
                     voice_meta: Optional[Dict] = None,
                     tts_provider: str = ELEVENLABS,
                     test_mode: bool = False,
                     test_type: Optional[str] = None,
                     tts_config: Optional[Dict] = None,
-                    sync_mode: Optional[str] = None) -> Dict[str, Any]:
+                    sync_mode: Optional[str] = None,
+                    target_language: Optional[str] = None) -> Dict[str, Any]:
     """Create a 10-second test render job (SAME production quality as full).
 
     tts_provider selects the voice source (ELEVENLABS / EDGE_TTS_TEST). Both
     feed the same locked production renderer; only the audio source differs.
-    V1.5.0: a resolved ElevenLabs tts_config is snapshotted into the job."""
+    V1.5.0: a resolved ElevenLabs tts_config is snapshotted into the job.
+    V1.6.0: an ElevenLabs job with no tts_config is resolved server-side (same
+    resolver as Preview) and fails closed instead of silently using the legacy
+    eleven_turbo_v2_5 default — prevents preview-vs-render voice divergence."""
     provider = _provider_for(tts_provider)
     av_row = db.get_avatar(avatar_id)
     if av_row and av_row.get("is_deleted") == 1:
@@ -335,6 +380,13 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         return {"ok": False, "error": "No voice provided."}
     if not (script_text or "").strip():
         return {"ok": False, "error": "Script is empty."}
+
+    # V1.6.0 TTS consistency: never queue an ElevenLabs job without a resolved
+    # language-aware config. Re-resolve server-side if the caller omitted it.
+    if provider == ELEVENLABS:
+        tts_config, err = _resolve_tts_config_for_submission(voice_id, tts_config, target_language)
+        if err:
+            return err
 
     job_id = _new_job_id()
     out = _output_path("test10s", avatar_id, "test10s", job_id)
@@ -424,7 +476,8 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
                      voice_meta: Optional[Dict] = None,
                      tts_provider: str = ELEVENLABS,
                      tts_config: Optional[Dict] = None,
-                     sync_mode: Optional[str] = None) -> Dict[str, Any]:
+                     sync_mode: Optional[str] = None,
+                     target_language: Optional[str] = None) -> Dict[str, Any]:
     """Create one or more full-render jobs (one per script part).
 
     V1.5.0: tts_config (the resolved per-voice ElevenLabs config) is snapshotted
@@ -433,7 +486,10 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
 
     V1.6.0: if a matching Script Voice Preview exists, its validated MASTER audio
     is snapshotted directly into the job, saving ElevenLabs quota and guaranteeing
-    identical acoustic output."""
+    identical acoustic output. An ElevenLabs job submitted without a tts_config is
+    resolved server-side (same resolver as Preview) and fails closed instead of
+    silently using the legacy eleven_turbo_v2_5 default — prevents preview-vs-render
+    voice divergence."""
     provider = _provider_for(tts_provider)
     from . import script_service
     av_row = db.get_avatar(avatar_id)
@@ -447,6 +503,13 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
         return {"ok": False, "error": "No voice provided."}
     if not (script_text or "").strip():
         return {"ok": False, "error": "Script is empty."}
+
+    # V1.6.0 TTS consistency: never queue an ElevenLabs job without a resolved
+    # language-aware config. Re-resolve server-side if the caller omitted it.
+    if provider == ELEVENLABS:
+        tts_config, err = _resolve_tts_config_for_submission(voice_id, tts_config, target_language)
+        if err:
+            return err
 
     sp = script_service.split_script(script_text, split_mode)
     if not sp["ok"]:

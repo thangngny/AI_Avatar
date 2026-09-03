@@ -104,7 +104,7 @@ def _startup_hardening(port: int) -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description="AI Avatar Studio local UI/controller")
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8077)
     ap.add_argument("--no-browser", action="store_true", help="Do not open a browser")
     args = ap.parse_args()
