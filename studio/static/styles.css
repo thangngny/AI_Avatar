@@ -1092,3 +1092,26 @@ textarea.drag-over{border-color:var(--accent)!important;background:var(--accent-
   font-weight:600;
   padding:12px 0;
 }
+/* V1.6.1 — inline rename + named-video badge */
+.rename-input{
+  width:100%;font-size:14px;font-weight:600;color:var(--text);
+  background:var(--bg-elevated,var(--bg2,#222));border:1px solid var(--accent);
+  border-radius:8px;padding:5px 9px;outline:none;
+  box-shadow:0 0 0 3px rgba(127,90,240,.18);
+}
+.rename-input:focus{border-color:var(--accent)}
+.jtitle{display:flex;align-items:center;gap:6px;min-height:22px}
+.jtitle .named-tag{
+  font-size:10px;font-weight:700;letter-spacing:.02em;
+  color:var(--accent);border:1px solid var(--accent);
+  border-radius:999px;padding:1px 7px;white-space:nowrap;cursor:default;
+}
+.jtitle .rename-edit-btn{
+  border:none;background:transparent;color:var(--muted2);
+  cursor:pointer;font-size:12px;padding:2px 4px;border-radius:6px;
+  opacity:0;transition:opacity .15s,background .15s;
+}
+.job:hover .rename-edit-btn,.jtitle:hover .rename-edit-btn{opacity:1}
+.rename-edit-btn:hover{background:var(--bg2,#1f1f24);color:var(--text)}
+.player-title{display:flex;align-items:center;gap:8px;min-width:0}
+.player-title b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

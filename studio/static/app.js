@@ -2228,7 +2228,8 @@ async function refreshJobs() {
       (j.job_id && j.job_id.toLowerCase().includes(q)) ||
       (j.script_name && j.script_name.toLowerCase().includes(q)) ||
       (j.script_text && j.script_text.toLowerCase().includes(q)) ||
-      (j.voice_id && j.voice_id.toLowerCase().includes(q))
+      (j.voice_id && j.voice_id.toLowerCase().includes(q)) ||
+      (j.display_name && j.display_name.toLowerCase().includes(q))
     );
   }
 
@@ -2306,11 +2307,22 @@ function jobCardHTML(j) {
     ? `<span class="tag warn">TEST KHẨU HÌNH</span>`
     : (isTest ? `<span class="tag warn">TEST</span>` : `<span class="tag good">VIDEO HOÀN CHỈNH</span>`);
   const kindLabel = isMouthTest ? "Test khẩu hình" : (j.kind === "test10s" ? "Kiểm tra 10s" : (j.script_name || "Video đầy đủ"));
+  // V1.6.1 — user-set video name. Falls back to the auto label when unset.
+  const named = !!(j.display_name && String(j.display_name).trim());
+  const titleText = named ? j.display_name : kindLabel;
+  const canRename = j.status === "complete";
+  const renameBtn = canRename
+    ? `<button class="rename-edit-btn" title="Đặt tên video" onclick="event.stopPropagation();startInlineRename('jtitletext_${j.job_id}','${j.job_id}',${JSON.stringify(j.display_name||"")})">✏️ Đặt tên</button>`
+    : "";
   return `<div class="job ${isTest ? 'is-test' : 'is-prod'}" data-job="${j.job_id}">
     ${thumb}
     <div class="jbody">
-      <div class="jtitle">${esc(kindLabel)} · ${esc(j.avatar_id)}</div>
-      <div class="jsub">Giọng: ${voiceDisplay}${voiceName && provider === "ELEVENLABS" ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
+      <div class="jtitle" id="jtitle_${j.job_id}">
+        <span class="jtitle-text" id="jtitletext_${j.job_id}">${esc(titleText)}</span>
+        ${named ? `<span class="named-tag" title="Đã đặt tên">Đã đặt tên</span>` : ""}
+        ${renameBtn}
+      </div>
+      <div class="jsub">${named ? `${esc(kindLabel)} · ` : ""}${esc(j.avatar_id)} · Giọng: ${voiceDisplay}${voiceName && provider === "ELEVENLABS" ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
       <div class="jbadges">${testBadge} ${providerTag} ${syncBadge}</div>
       <div class="fstatus ${j.status}">${statusLabel(j.status)}${j.error ? " · " + stageTxt : ""}</div>
       ${["rendering","encoding","verifying","preparing_audio"].includes(j.status) && j.progress != null ? `<div class="progress" style="margin-top:6px"><div style="width:${j.progress}%"></div></div>` : ""}
@@ -2383,12 +2395,13 @@ async function playJob(id) {
   let v = $("#playerModal"); if (v) v.remove();
   v = document.createElement("div"); v.id = "playerModal";
   v.className = "modal-bg";
-  const title = esc(j.script_name || j.kind || "Video");
+  const title = (j.display_name && j.display_name.trim()) ? j.display_name : (j.script_name || j.kind || "Video");
   const avatar = esc(j.avatar_id || "Avatar");
+  const titleJson = JSON.stringify(j.display_name || "");
 
   v.innerHTML = `<div class="player-modal-card">
-    <div style="width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div><b>${title}</b> · <span class="muted">${avatar}</span></div>
+    <div style="width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px">
+      <div class="player-title"><b id="playerTitleText">${esc(title)}</b> · <span class="muted">${avatar}</span></div>
       <div class="modal-close" onclick="closePlayerModal()">✕</div>
     </div>
     <div class="player-video-wrap">
@@ -2404,7 +2417,8 @@ async function playJob(id) {
         <button class="rate-btn" data-rate="2" onclick="setPlaybackRate(2)">2x</button>
       </div>
       <div class="row">
-        <button class="ghost tiny" onclick="downloadJob('${j.job_id}','${title}')">Tải video</button>
+        <button class="ghost tiny" onclick="renameFromPlayer('${j.job_id}',${titleJson})" title="Đặt tên cho video">✏️ Đặt tên</button>
+        <button class="ghost tiny" onclick="downloadJob('${j.job_id}',${JSON.stringify(title)})">Tải video</button>
         <button class="primary tiny" onclick="closePlayerModal()">Đóng (Esc)</button>
       </div>
     </div>
@@ -2426,12 +2440,73 @@ function closePlayerModal() {
 }
 
 async function downloadJob(id, name) {
+  // V1.6.1: prefer the latest user-set display_name as the filename.
+  let fname = name || "video";
+  try {
+    const j = await api(`/api/render/jobs/${id}`);
+    fname = (j.display_name && j.display_name.trim()) ? j.display_name
+           : (j.script_name || j.kind || name || "video");
+  } catch (e) { /* keep fallback */ }
+  const safe = (fname || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 120) || "video";
   const a = document.createElement("a");
   a.href = `/api/render/jobs/${id}/preview`;
-  a.download = `${name || "video"}.mp4`;
+  a.download = `${safe}.mp4`;
   document.body.appendChild(a); a.click(); a.remove();
 }
 async function openFolder(id) { await api(`/api/render/jobs/${id}/open-folder`, { method: "POST" }); }
+
+// V1.6.1 — inline video rename. Reusable for the job card and the player modal.
+function _attachInlineRename(input, jobId, currentVal, onDone) {
+  input.focus(); input.select();
+  let settled = false;
+  const finish = async (save) => {
+    if (settled) return; settled = true;
+    const v = input.value.trim();
+    let newName = currentVal || null;
+    if (save && v !== (currentVal || "")) {
+      try {
+        const r = await api(`/api/render/jobs/${jobId}/rename`,
+          { method: "POST", body: JSON.stringify({ name: v }) });
+        if (r.ok) { toast(v ? "Đã đặt tên video" : "Đã đặt lại tên mặc định", "good"); newName = r.display_name || (v || null); }
+        else { toast(r.error || "Không đặt tên được", "bad"); }
+      } catch (e) { toast("Không đặt tên được", "bad"); }
+    }
+    onDone(newName);
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
+  };
+  input.onblur = () => finish(true);
+}
+function startInlineRename(spanId, jobId, currentVal) {
+  const span = document.getElementById(spanId);
+  if (!span) return;
+  const input = document.createElement("input");
+  input.type = "text"; input.className = "rename-input"; input.maxLength = 120;
+  input.value = currentVal || ""; input.placeholder = "Nhập tên cho video…";
+  span.replaceWith(input);
+  _attachInlineRename(input, jobId, currentVal || "", () => refreshJobs());
+}
+async function renameFromPlayer(jobId, currentVal) {
+  const titleEl = document.getElementById("playerTitleText");
+  if (!titleEl) return;
+  const input = document.createElement("input");
+  input.type = "text"; input.className = "rename-input"; input.maxLength = 120;
+  input.value = currentVal || ""; input.placeholder = "Nhập tên cho video…";
+  input.style.maxWidth = "340px";
+  titleEl.replaceWith(input);
+  _attachInlineRename(input, jobId, currentVal || "", async () => {
+    // Re-fetch and rebuild the player title with the new name.
+    try {
+      const j = await api(`/api/render/jobs/${jobId}`);
+      const b = document.createElement("b"); b.id = "playerTitleText";
+      b.textContent = (j.display_name && j.display_name.trim()) ? j.display_name
+                     : (j.script_name || j.kind || "Video");
+      input.replaceWith(b);
+    } catch (e) { refreshJobs(); }
+  });
+}
 
 async function retryJob(id) {
   const r = await api(`/api/render/jobs/${id}/retry`, { method: "POST" });

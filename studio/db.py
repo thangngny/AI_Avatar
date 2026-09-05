@@ -75,7 +75,8 @@ def init_db() -> None:
                     tts_config        TEXT,                       -- JSON: resolved per-voice TTS config snapshot (V1.5.0; no key)
                     tts_config_hash   TEXT,                       -- sha1 of the resolved config (no key)
                     sync_mode         TEXT,                       -- auto_current|history_match|manual|none
-                    history_item_id   TEXT                        -- ElevenLabs history item id (Mode B)
+                    history_item_id   TEXT,                       -- ElevenLabs history item id (Mode B)
+                    display_name      TEXT                        -- V1.6.1: user-set video name (rename); NULL = auto label
                 );
 
                 CREATE TABLE IF NOT EXISTS voice_configs (
@@ -192,6 +193,7 @@ def init_db() -> None:
                 ("audio_source", "TEXT DEFAULT 'generated'"),
                 ("preview_id", "TEXT"),
                 ("preview_fingerprint", "TEXT"),
+                ("display_name", "TEXT"),
             ):
                 if col not in existing_jobs:
                     conn.execute(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
@@ -301,6 +303,42 @@ def get_job(job_id: str) -> Optional[Dict[str, Any]]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+# V1.6.1 — user-set video name (rename). Sanitize: trim, collapse whitespace,
+# strip control chars, cap length. Empty/whitespace -> NULL (revert to auto label).
+_RENAME_MAX = 120
+
+def sanitize_display_name(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    # Keep letters/digits/space and common punctuation; drop control chars and
+    # path separators that would break a download filename or DB display.
+    import unicodedata
+    s = unicodedata.normalize("NFC", str(raw)).replace("\r", " ").replace("\n", " ").replace("\t", " ")
+    s = "".join(c for c in s if c.isprintable() and c not in "\x00\\/:*?\"<>|")
+    s = " ".join(s.split()).strip()
+    if not s:
+        return None
+    return s[:_RENAME_MAX]
+
+def rename_job(job_id: str, display_name: Optional[str]) -> bool:
+    """Set a user-facing video name. Empty -> reverts to the auto label (NULL).
+    Returns True if a job row was updated."""
+    safe_id = (job_id or "").strip()
+    if not safe_id:
+        return False
+    name = sanitize_display_name(display_name)
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute(
+                "UPDATE jobs SET display_name=?, updated_at=? WHERE job_id=?",
+                (name, _now(), safe_id))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
 
 
 def list_jobs(limit: int = 100, include_cancelled: bool = True,

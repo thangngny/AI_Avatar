@@ -1456,6 +1456,25 @@ def render_delete_route(job_id):
     return jsonify(res)
 
 
+@app.route("/api/render/jobs/<job_id>/rename", methods=["POST"])
+def render_rename_route(job_id):
+    """V1.6.1 — set a user-facing video name for a completed render.
+    Body: {"name": "..."}. Empty/whitespace reverts to the auto label."""
+    safe_id = _sanitize_filename(job_id)
+    data = request.get_json(silent=True) or {}
+    raw = data.get("name")
+    if raw is not None and not isinstance(raw, str):
+        return jsonify({"ok": False, "error": "Tên không hợp lệ."}), 400
+    if not db.get_job(safe_id):
+        return jsonify({"ok": False, "error": "Không tìm thấy video."}), 404
+    ok = db.rename_job(safe_id, raw)
+    if not ok:
+        return jsonify({"ok": False, "error": "Không cập nhật được tên."}), 500
+    updated = db.get_job(safe_id)
+    return jsonify({"ok": True, "job_id": safe_id,
+                    "display_name": updated.get("display_name")})
+
+
 @app.route("/api/render/jobs/<job_id>/restore", methods=["POST"])
 def render_restore_route(job_id):
     safe_id = _sanitize_filename(job_id)
