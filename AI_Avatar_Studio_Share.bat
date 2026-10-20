@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM =====================================================================
 REM  AI Avatar Studio — Trusted-Collaborator Share launcher (one-click).
 REM

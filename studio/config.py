@@ -21,9 +21,23 @@ SYSTEM_STATUS = os.path.join(ROOT, "system_status.py")
 # launcher and run_studio.py enforce this; a process running under any other
 # interpreter is reported RUNTIME_MISMATCH and must not claim READY. May be
 # overridden via STUDIO_CANONICAL_INTERPRETER for a relocated runtime.
-CANONICAL_INTERPRETER = os.environ.get(
-    "STUDIO_CANONICAL_INTERPRETER", r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
-).strip()
+def _resolve_canonical_interpreter() -> str:
+    env_override = os.environ.get("STUDIO_CANONICAL_INTERPRETER", "").strip()
+    if env_override:
+        return env_override
+    candidates = [
+        r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        os.path.normpath(os.path.join(ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),
+        r"C:\CongThang_AI_Avatar_TikTokLive\runtime\venv\Scripts\python.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return candidates[0]
+
+
+CANONICAL_INTERPRETER = _resolve_canonical_interpreter()
 # Single source of truth for the browser<->backend API contract version.
 API_CONTRACT_PATH = os.path.join(ROOT, "config", "api_contract.json")
 
@@ -37,10 +51,26 @@ RUNTIME_DIR = os.path.join(ROOT, "data", "studio_runtime")
 TEMP_DIR = os.path.join(RUNTIME_DIR, "temp")          # temp scratch audio
 PREVIEWS_DIR = os.path.join(RUNTIME_DIR, "audio_previews")  # persistent script voice previews
 VOICE_SAMPLES_DIR = os.path.join(RUNTIME_DIR, "voice_samples")  # pre-generated static voice samples
+
+
+def _resolve_renders_dir() -> str:
+    env_dir = os.environ.get("STUDIO_RENDERS_DIR", "").strip()
+    if env_dir:
+        return env_dir
+    candidates = [
+        r"C:\CongThang_AI_Avatar\renders",
+        r"D:\CongThang_AI_Avatar\renders",
+        os.path.normpath(os.path.join(ROOT, "..", "renders")),
+    ]
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return candidates[0]
+
+
 # Render output directory. Overridable via STUDIO_RENDERS_DIR (V1.4.1 R04) so
-# the system is not hard-coupled to the D: drive on another machine. Default
-# preserves the exact current production path.
-RENDERS_DIR = os.environ.get("STUDIO_RENDERS_DIR", "").strip() or r"D:\CongThang_AI_Avatar\renders"
+# the system is not hard-coupled to the D: drive on another machine.
+RENDERS_DIR = _resolve_renders_dir()
 DB_PATH = os.path.join(RUNTIME_DIR, "studio.db")
 # Runtime instance manifest (process identity + fingerprints). Lives under the
 # gitignored studio_runtime namespace so machine-specific state is never tracked.
@@ -50,6 +80,7 @@ LOG_DIR = os.path.join(RUNTIME_DIR, "logs")            # per-job technical logs
 # --- ElevenLabs ----------------------------------------------------------
 ELEVENLABS_TTS_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_VOICE_URL = "https://api.elevenlabs.io/v1/voices/{voice_id}"
+ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v1/voices"
 ELEVENLABS_VOICE_SETTINGS_URL = "https://api.elevenlabs.io/v1/voices/{voice_id}/settings"
 ELEVENLABS_MODELS_URL = "https://api.elevenlabs.io/v1/models"
 ELEVENLABS_HISTORY_URL = "https://api.elevenlabs.io/v1/history"

@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM =====================================================================
 REM  AI Avatar Studio — Stop sharing.
 REM  Reads only diagnostics\share_runtime.json for THIS share session.

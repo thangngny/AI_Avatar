@@ -40,8 +40,20 @@ _APPROVED_IDS = {v["voice_id"] for v in APPROVED_RENDER_VOICES if v.get("enabled
 
 
 def is_approved_render_voice(voice_id: str) -> bool:
-    """True iff voice_id is one of the enabled production-approved render voices."""
-    return (voice_id or "").strip() in _APPROVED_IDS
+    """True iff voice_id is one of the enabled production-approved render voices
+    or a custom voice registered by the user."""
+    vid = (voice_id or "").strip()
+    if not vid:
+        return False
+    if vid in _APPROVED_IDS:
+        return True
+    try:
+        from . import db
+        if db.is_custom_approved_voice(vid):
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def approved_voice_ids() -> List[str]:

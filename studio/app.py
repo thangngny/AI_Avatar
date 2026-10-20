@@ -16,7 +16,7 @@ import secrets
 import hashlib
 import math
 import gzip
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Tuple
 
 from flask import (Flask, request, jsonify, send_file, send_from_directory,
                    abort, Response, session, redirect, url_for)
@@ -513,6 +513,9 @@ def system_status():
         "elevenlabs_connected": el.is_configured(),
         "edge_tts_available": edge.is_available(),
         "elevenlabs_key_masked": envutil.mask_api_key(),
+        "elevenlabs_model_id": el.model_id(),
+        "elevenlabs_voice_id": envutil.env_str("ELEVENLABS_VOICE_ID", "pGapy9MNHCukzJtjavF0"),
+        "tts_max_text_chars": envutil.env_int("TTS_MAX_TEXT_CHARS", 4800),
         "gpus": gpus,
         "gpu_count": len(gpus),
         "renders_dir": config.RENDERS_DIR,
@@ -1103,6 +1106,42 @@ def approved_voice_sample_download(voice_id):
 # matching, not script replacement). The browser never calls ElevenLabs
 # directly — all calls go through this backend with the server-side key.
 
+@app.route("/api/elevenlabs/voices")
+def el_all_voices():
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify(el.get_all_voices(refresh=refresh))
+
+
+@app.route("/api/voices/custom", methods=["GET"])
+def get_custom_voices():
+    return jsonify({"ok": True, "voices": db.list_custom_voices()})
+
+
+@app.route("/api/voices/custom", methods=["POST"])
+def add_custom_voice():
+    data = request.get_json(silent=True) or {}
+    vid = (data.get("voice_id") or "").strip()
+    if not vid:
+        return jsonify({"ok": False, "error": "Mã Voice ID không được để trống."}), 400
+    chk = el.check_voice(vid)
+    if not chk.get("ok"):
+        return jsonify({"ok": False, "error": chk.get("error") or "Không thể xác thực Voice ID trên ElevenLabs."}), 400
+    name = (data.get("name") or chk.get("name") or vid).strip()
+    category = (data.get("category") or chk.get("category") or "custom").strip()
+    desc = (data.get("description") or "").strip()
+    labels = data.get("labels") or chk.get("labels") or {}
+    preview_url = data.get("preview_url") or chk.get("preview_url") or ""
+    db.save_custom_voice(vid, name=name, category=category, description=desc, labels=labels, preview_url=preview_url)
+    return jsonify({"ok": True, "voice": {"voice_id": vid, "name": name, "category": category, "description": desc, "labels": labels, "preview_url": preview_url}})
+
+
+@app.route("/api/voices/custom/<voice_id>", methods=["DELETE"])
+def remove_custom_voice(voice_id):
+    vid = (voice_id or "").strip()
+    removed = db.delete_custom_voice(vid)
+    return jsonify({"ok": removed})
+
+
 @app.route("/api/elevenlabs/voices/<voice_id>/settings")
 def el_voice_settings(voice_id):
     refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
@@ -1369,6 +1408,7 @@ def render_full():
     gate = _enforce_render_voice_allowlist(data)
     if gate:
         return jsonify(gate[0]), gate[1]
+    video_name = data.get("video_name") or data.get("name") or data.get("display_name")
     return jsonify(render_service.create_full_jobs(
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("split_mode", "full"),
@@ -1376,13 +1416,317 @@ def render_full():
         tts_provider=data.get("tts_provider", render_service.ELEVENLABS),
         tts_config=data.get("tts_config"),
         sync_mode=data.get("sync_mode"),
-        target_language=data.get("target_language")))
+        target_language=data.get("target_language"),
+        video_name=video_name))
+
+
+@app.route("/api/render/validate", methods=["POST"])
+def render_validate():
+    """V1.6.2 — Pre-flight validation endpoint.
+    Performs full system, avatar, script, quota, and voice compatibility checks
+    before the user submits a render job, returning a structured checklist."""
+    data = request.get_json(silent=True) or {}
+    avatar_id = (data.get("avatar_id") or "").strip()
+    script_text = (data.get("script_text") or "").strip()
+    tts_provider = (data.get("tts_provider") or "elevenlabs").lower()
+    voice_id = (data.get("voice_id") or "").strip()
+    model_id = (data.get("model_id") or el.model_id() or "eleven_v4").strip()
+    target_language = (data.get("target_language") or "vi").strip().lower()
+
+    checklist = []
+
+    # 1. Check Avatar
+    if not avatar_id:
+        checklist.append({
+            "id": "avatar",
+            "title": "1. Avatar",
+            "status": "FAIL",
+            "step": 1,
+            "message": "Chưa chọn Avatar. Vui lòng chọn ở Bước 1.",
+        })
+    else:
+        avatars = avatar_service.list_avatars()
+        av = next((a for a in avatars if a.get("avatar_id") == avatar_id), None)
+        if not av:
+            checklist.append({
+                "id": "avatar",
+                "title": "1. Avatar",
+                "status": "FAIL",
+                "step": 1,
+                "message": f"Không tìm thấy Avatar '{avatar_id}'.",
+            })
+        elif not av.get("ready"):
+            checklist.append({
+                "id": "avatar",
+                "title": "1. Avatar",
+                "status": "FAIL",
+                "step": 1,
+                "message": f"Avatar '{avatar_id}' đang được xử lý hoặc chưa hoàn tất.",
+            })
+        else:
+            checklist.append({
+                "id": "avatar",
+                "title": "1. Avatar",
+                "status": "PASS",
+                "step": 1,
+                "value": avatar_id,
+                "message": f"Avatar '{avatar_id}' đã sẵn sàng.",
+            })
+
+    # 2. Check Script
+    if not script_text:
+        checklist.append({
+            "id": "script",
+            "title": "2. Kịch bản",
+            "status": "FAIL",
+            "step": 2,
+            "message": "Chưa nhập kịch bản. Vui lòng nhập nội dung ở Bước 2.",
+        })
+        parsed_words = 0
+        parsed_chars = 0
+    else:
+        parsed = script_service.parse_script(text=script_text)
+        parsed_words = parsed.get("words", 0)
+        parsed_chars = parsed.get("chars", 0)
+        dur_str = parsed.get("estimated_duration_str", "—")
+        caps = el.MODEL_CAPS.get(model_id, {})
+        max_chunk = caps.get("max_text", 10000)
+
+        if parsed_chars > 30000:
+            msg = f"{parsed_words} từ (~{dur_str}). Kịch bản rất dài, hệ thống sẽ tự động tối ưu chia đoạn."
+            stat = "WARN"
+        elif parsed_chars > max_chunk:
+            msg = f"{parsed_words} từ (~{dur_str}). Hệ thống tự động chia đoạn mượt mà."
+            stat = "PASS"
+        else:
+            msg = f"{parsed_words} từ (~{dur_str}) · Hợp lệ."
+            stat = "PASS"
+
+        checklist.append({
+            "id": "script",
+            "title": "2. Kịch bản",
+            "status": stat,
+            "step": 2,
+            "words": parsed_words,
+            "chars": parsed_chars,
+            "message": msg,
+        })
+
+    # 3. Check Voice & Model
+    if tts_provider == "edge":
+        if edge.is_available():
+            checklist.append({
+                "id": "voice_model",
+                "title": "3. Giọng đọc",
+                "status": "PASS",
+                "step": 3,
+                "message": f"Giọng dùng thử ({voice_id or edge.DEFAULT_VOICE}) khả dụng.",
+            })
+        else:
+            checklist.append({
+                "id": "voice_model",
+                "title": "3. Giọng đọc",
+                "status": "FAIL",
+                "step": 3,
+                "message": "Dịch vụ giọng dùng thử hiện không khả dụng.",
+            })
+    else:
+        # ElevenLabs
+        if not el.is_configured():
+            checklist.append({
+                "id": "voice_model",
+                "title": "3. Giọng đọc",
+                "status": "FAIL",
+                "step": 3,
+                "message": "Chưa cấu hình API Key ElevenLabs trong Cài đặt.",
+            })
+        elif not voice_id:
+            checklist.append({
+                "id": "voice_model",
+                "title": "3. Giọng đọc",
+                "status": "FAIL",
+                "step": 3,
+                "message": "Chưa chọn giọng đọc ở Bước 3.",
+            })
+        else:
+            comp = el.check_compatibility(voice_id, model_id, target_language)
+            if not el._guard_passes(comp):
+                reasons = comp.get("reasons") or [comp.get("error") or "Không tương thích"]
+                checklist.append({
+                    "id": "voice_model",
+                    "title": "3. Giọng đọc",
+                    "status": "WARN",
+                    "step": 3,
+                    "message": f"Lưu ý: {'; '.join(reasons)}. Khuyên dùng Eleven v4.",
+                })
+            else:
+                model_label = "Eleven v4" if model_id == "eleven_v4" else model_id
+                checklist.append({
+                    "id": "voice_model",
+                    "title": "3. Giọng đọc",
+                    "status": "PASS",
+                    "step": 3,
+                    "message": f"Giọng đọc đã chọn + {model_label} đã sẵn sàng.",
+                })
+
+    # 4. Check Quota
+    if tts_provider == "edge":
+        checklist.append({
+            "id": "quota",
+            "title": "4. Hạn mức tài khoản",
+            "status": "PASS",
+            "message": "Miễn phí, không tiêu tốn hạn mức tài khoản.",
+        })
+    else:
+        if not el.is_configured():
+            checklist.append({
+                "id": "quota",
+                "title": "4. Hạn mức tài khoản",
+                "status": "FAIL",
+                "message": "Chưa kết nối tài khoản ElevenLabs.",
+            })
+        else:
+            try:
+                acc = el.account_status()
+                if acc.get("ok"):
+                    rem = acc.get("remaining")
+                    tier = acc.get("tier", "chuẩn")
+                    needed = parsed_chars or 100
+                    if rem is not None and rem < needed:
+                        checklist.append({
+                            "id": "quota",
+                            "title": "4. Hạn mức tài khoản",
+                            "status": "FAIL",
+                            "message": f"Không đủ hạn mức (cần ~{needed:,} ký tự, còn {rem:,}). Vui lòng nạp thêm trên ElevenLabs.",
+                        })
+                    elif rem is not None and rem - needed < 500:
+                        checklist.append({
+                            "id": "quota",
+                            "title": "4. Hạn mức tài khoản",
+                            "status": "WARN",
+                            "message": f"Hạn mức sắp hết: Cần ~{needed:,} ký tự / Còn {rem:,} ký tự ({tier}).",
+                        })
+                    else:
+                        rem_str = f"{rem:,}" if rem is not None else "đủ"
+                        checklist.append({
+                            "id": "quota",
+                            "title": "4. Hạn mức tài khoản",
+                            "status": "PASS",
+                            "message": f"Đủ hạn mức ({rem_str} ký tự khả dụng).",
+                        })
+                else:
+                    checklist.append({
+                        "id": "quota",
+                        "title": "4. Hạn mức tài khoản",
+                        "status": "WARN",
+                        "message": f"Không tra cứu được hạn mức: {acc.get('error', 'Lỗi API')}.",
+                    })
+            except Exception as e:
+                checklist.append({
+                    "id": "quota",
+                    "title": "4. Hạn mức tài khoản",
+                    "status": "WARN",
+                    "message": f"Lỗi kiểm tra hạn mức: {e}",
+                })
+
+    # 5. Check System / GPU / Storage
+    gpus = gpu_service.status()
+    truth = render_service.load_truth()
+    dir_ok = _dir_writable(config.RENDERS_DIR)
+
+    if not truth["ok"]:
+        checklist.append({
+            "id": "system",
+            "title": "5. Máy chủ & GPU",
+            "status": "FAIL",
+            "message": f"Cấu hình render lỗi: {truth.get('error')}",
+        })
+    elif not dir_ok:
+        checklist.append({
+            "id": "system",
+            "title": "5. Máy chủ & GPU",
+            "status": "FAIL",
+            "message": f"Thư mục lưu trữ {config.RENDERS_DIR} không có quyền ghi.",
+        })
+    elif not gpus:
+        checklist.append({
+            "id": "system",
+            "title": "5. Máy chủ & GPU",
+            "status": "FAIL",
+            "message": "Không tìm thấy GPU phù hợp để tạo video.",
+        })
+    else:
+        g = gpus[0]
+        if g.get("state") == "BUSY":
+            checklist.append({
+                "id": "system",
+                "title": "5. Máy chủ & GPU",
+                "status": "WARN",
+                "message": f"GPU đang xử lý video khác. Video của bạn sẽ tự động xếp hàng đợi.",
+            })
+        else:
+            checklist.append({
+                "id": "system",
+                "title": "5. Máy chủ & GPU",
+                "status": "PASS",
+                "message": "Máy chủ và GPU đã sẵn sàng tạo video.",
+            })
+
+    can_render = all(item["status"] != "FAIL" for item in checklist)
+    fails = sum(1 for item in checklist if item["status"] == "FAIL")
+    warns = sum(1 for item in checklist if item["status"] == "WARN")
+    passes = sum(1 for item in checklist if item["status"] == "PASS")
+
+    if fails > 0:
+        headline = f"Chưa đủ điều kiện ({fails} mục cần bổ sung)"
+        headline_type = "bad"
+    elif warns > 0:
+        headline = f"Có thể tạo video ({warns} lưu ý)"
+        headline_type = "warn"
+    else:
+        headline = "Sẵn sàng tạo video!"
+        headline_type = "good"
+
+    return jsonify({
+        "ok": True,
+        "can_render": can_render,
+        "checklist": checklist,
+        "summary": {
+            "passed": passes,
+            "warnings": warns,
+            "failures": fails,
+            "headline": headline,
+            "headline_type": headline_type,
+        }
+    })
+
+
+def _check_file_exists(path: Optional[str]) -> Tuple[bool, Optional[str]]:
+    if not path:
+        return False, None
+    if os.path.isfile(path):
+        return True, path
+    if path.startswith("D:\\"):
+        alt = "C:\\" + path[3:]
+        if os.path.isfile(alt):
+            return True, alt
+    elif path.startswith("C:\\"):
+        alt = "D:\\" + path[3:]
+        if os.path.isfile(alt):
+            return True, alt
+    return False, path
 
 
 @app.route("/api/render/jobs")
 def render_jobs():
     limit = int(request.args.get("limit", "100"))
-    return jsonify({"jobs": db.list_jobs(limit=limit)})
+    jobs = db.list_jobs(limit=limit)
+    for j in jobs:
+        exists, actual = _check_file_exists(j.get("output_path"))
+        j["file_exists"] = exists
+        if exists and actual:
+            j["output_path"] = actual
+    return jsonify({"jobs": jobs})
 
 
 @app.route("/api/render/jobs/<job_id>")
@@ -1390,6 +1734,10 @@ def render_job(job_id):
     j = db.get_job(job_id)
     if not j:
         abort(404)
+    exists, actual = _check_file_exists(j.get("output_path"))
+    j["file_exists"] = exists
+    if exists and actual:
+        j["output_path"] = actual
     return jsonify(j)
 
 
@@ -1426,8 +1774,8 @@ def render_job_preview(job_id):
     j = db.get_job(job_id)
     if not j or not j.get("output_path"):
         abort(404)
-    p = j["output_path"]
-    if not os.path.isfile(p):
+    exists, p = _check_file_exists(j["output_path"])
+    if not exists or not p:
         abort(404)
     return send_file(p, mimetype="video/mp4", conditional=True)
 
@@ -1507,6 +1855,8 @@ def settings_get():
         "elevenlabs_connected": el.is_configured(),
         "elevenlabs_key_masked": envutil.mask_api_key(),
         "elevenlabs_model_id": el.model_id(),
+        "elevenlabs_voice_id": envutil.env_str("ELEVENLABS_VOICE_ID", "pGapy9MNHCukzJtjavF0"),
+        "tts_max_text_chars": envutil.env_int("TTS_MAX_TEXT_CHARS", 4800),
         "edge_tts_available": edge.is_available(),
         "edge_tts_default_voice": edge.DEFAULT_VOICE,
         "renders_dir": config.RENDERS_DIR,
@@ -1521,22 +1871,88 @@ def elevenlabs_quota():
     return jsonify(el.account_status())
 
 
-@app.route("/api/settings/elevenlabs", methods=["POST"])
-def settings_set_key():
-    """Update the ElevenLabs API key in .env (never logged, never returned in
-    full). Mirrors launcher.write_env: preserves every other line."""
+@app.route("/api/settings/elevenlabs", methods=["GET", "POST"])
+def settings_elevenlabs():
+    """Get or update ElevenLabs configurations in .env (API key, default model, voice ID).
+    Preserves every other line in .env and reloads immediately."""
+    if request.method == "GET":
+        return jsonify({
+            "ok": True,
+            "connected": el.is_configured(),
+            "key_masked": envutil.mask_api_key(),
+            "model_id": el.model_id(),
+            "voice_id": envutil.env_str("ELEVENLABS_VOICE_ID", "pGapy9MNHCukzJtjavF0"),
+            "max_text_chars": envutil.env_int("TTS_MAX_TEXT_CHARS", 4800),
+        })
+
     data = request.get_json(silent=True) or {}
     key = (data.get("api_key") or "").strip()
-    if not key:
-        return jsonify({"ok": False, "error": "Empty key."}), 400
-    ok = _update_env_key("ELEVENLABS_API_KEY", key)
-    if not ok:
-        return jsonify({"ok": False, "error": "Could not write .env."}), 500
-    # Force reload so the new key takes effect immediately.
+    model = (data.get("model_id") or "").strip()
+    voice = (data.get("voice_id") or "").strip()
+    max_chars = data.get("max_text_chars")
+    sync_profiles = bool(data.get("sync_profiles"))
+
+    updated = False
+    if key:
+        ok = _update_env_key("ELEVENLABS_API_KEY", key)
+        if not ok:
+            return jsonify({"ok": False, "error": "Could not write API key to .env."}), 500
+        updated = True
+
+    if model:
+        _update_env_key("ELEVENLABS_MODEL_ID", model)
+        _update_env_key("ELEVENLABS_STUDIO_MODEL_ID", model)
+        updated = True
+
+        if sync_profiles:
+            try:
+                for p in db.list_profiles():
+                    db.save_profile(
+                        p["voice_id"],
+                        p["language_code"],
+                        model,
+                        selection_source="USER_MANUAL",
+                        notes=f"Synchronized with global setting ({model})",
+                    )
+            except Exception:
+                pass
+
+    if voice:
+        _update_env_key("ELEVENLABS_VOICE_ID", voice)
+        updated = True
+
+    if max_chars:
+        try:
+            val = int(max_chars)
+            _update_env_key("TTS_MAX_TEXT_CHARS", str(val))
+            updated = True
+        except (ValueError, TypeError):
+            pass
+
+    if not updated and not key and not model and not voice and not max_chars and not sync_profiles:
+        return jsonify({"ok": False, "error": "No configuration parameters provided."}), 400
+
+    # Force reload so the new settings take effect immediately.
     envutil.load_env(force=True)
-    el._API_KEY = None  # reset cached key so the new value is read on next use
-    return jsonify({"ok": True, "key_masked": envutil.mask_api_key(),
-                    "connected": el.is_configured()})
+    el._API_KEY = None  # reset cached key
+    return jsonify({
+        "ok": True,
+        "key_masked": envutil.mask_api_key(),
+        "model_id": el.model_id(),
+        "voice_id": envutil.env_str("ELEVENLABS_VOICE_ID", ""),
+        "max_text_chars": envutil.env_int("TTS_MAX_TEXT_CHARS", 4800),
+        "connected": el.is_configured()
+    })
+
+
+@app.route("/api/system/open-renders-folder", methods=["POST"])
+def open_renders_folder():
+    """Open renders folder in Windows Explorer."""
+    try:
+        os.startfile(config.RENDERS_DIR)
+        return jsonify({"ok": True, "path": config.RENDERS_DIR})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 def _update_env_key(key: str, value: str) -> bool:

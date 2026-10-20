@@ -194,11 +194,12 @@ def _maybe_wrap_dataparallel(unet, model_dtype):
     use_multi = os.getenv("OFFLINE_USE_MULTI_GPU", "true").strip().lower() not in ("0", "false", "no", "off")
     if not use_multi or torch.cuda.device_count() < 2:
         return unet, False
-    device_ids = list(range(torch.cuda.device_count()))
+    primary_idx = device.index if device.type == "cuda" and device.index is not None else 0
+    device_ids = [primary_idx] + [i for i in range(torch.cuda.device_count()) if i != primary_idx]
     unet.device = device
     unet.model = unet.model.to(device)
-    unet.model = torch.nn.DataParallel(unet.model, device_ids=device_ids, output_device=0)
-    print(f'[multi-gpu] DataParallel UNet on GPUs {device_ids}')
+    unet.model = torch.nn.DataParallel(unet.model, device_ids=device_ids, output_device=primary_idx)
+    print(f'[multi-gpu] DataParallel UNet on GPUs {device_ids} (primary={primary_idx})')
     return unet, True
 
 

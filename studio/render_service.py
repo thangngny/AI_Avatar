@@ -477,7 +477,8 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
                      tts_provider: str = ELEVENLABS,
                      tts_config: Optional[Dict] = None,
                      sync_mode: Optional[str] = None,
-                     target_language: Optional[str] = None) -> Dict[str, Any]:
+                     target_language: Optional[str] = None,
+                     video_name: Optional[str] = None) -> Dict[str, Any]:
     """Create one or more full-render jobs (one per script part).
 
     V1.5.0: tts_config (the resolved per-voice ElevenLabs config) is snapshotted
@@ -539,8 +540,10 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
             except Exception:
                 pass
 
+        display_name_val = db.sanitize_display_name(video_name) if video_name else None
         db.create_job({
             "job_id": job_id, "kind": "full", "avatar_id": avatar_id,
+            "display_name": display_name_val,
             "voice_id": voice_id,
             "voice_meta": json.dumps(voice_meta, ensure_ascii=False) if voice_meta else None,
             "script_text": part["text"][:8000], "script_name": part["label"],

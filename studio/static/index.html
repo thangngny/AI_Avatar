@@ -8,7 +8,7 @@
      contract_version in config/api_contract.json. Bump all three together on
      every contract change so browsers always fetch the matching app.js/styles
      instead of a stale cached copy (the "Studio cần khởi động lại" false-block). -->
-<link rel="stylesheet" href="/styles.css?v=2026-09-05.1" />
+<link rel="stylesheet" href="/styles.css?v=2026-10-20.5" />
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>" />
 </head>
 <body>
@@ -50,7 +50,7 @@
       </button>
       <button class="nav-item" data-view="history">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M12 8v5l4 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/></svg>
-        <span>Lịch sử render</span>
+        <span>Lịch sử video</span>
       </button>
       <button class="nav-item" data-view="trash">
         <svg viewBox="0 0 24 24" class="ic" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -72,12 +72,12 @@
   </div>
 
   <footer class="queue-bar" id="queueBar" onclick="toggleQueueDrawer()" title="Xem hàng đợi render">
-    <div class="queue-label">HÀNG ĐỢI RENDER <span class="qchev" id="qChev">▴</span></div>
+    <div class="queue-label">HÀNG ĐỢI XỬ LÝ <span class="qchev" id="qChev">▴</span></div>
     <div class="queue-items" id="queueItems"><span class="muted">Đang nghỉ</span></div>
   </footer>
   <div class="queue-drawer" id="queueDrawer" hidden></div>
 </div>
 
-<script src="/app.js?v=2026-09-05.1"></script>
+<script src="/app.js?v=2026-10-20.5"></script>
 </body>
 </html>

@@ -32,12 +32,20 @@ REPO_ROOT = os.path.dirname(HERE)  # C:\CongThang_AI_Avatar\AI_avatar
 
 # Default torch interpreter. Overridable via STUDIO_TORCH_PYTHON for a future
 # standalone env. This is the ONLY place the path is hardcoded.
-# V1.6.0: the production runtime is a product-owned, self-contained venv at
-# D:\CongThang_AI_Avatar\runtime\venv (recreated from requirements-handover.lock,
-# torch 2.5.1+cu121). The old C:\CongThang\AI_avatar\latentsync_env (under the
-# experimental LatentSync tree) is DEPRECATED_FOR_AI_AVATAR (left in place, not
-# deleted) — it was broken (torch/site-packages wiped).
-_DEFAULT_TORCH_PYTHON = r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
+def _resolve_default_torch_python() -> str:
+    candidates = [
+        r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        os.path.normpath(os.path.join(REPO_ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),
+        r"C:\CongThang_AI_Avatar_TikTokLive\runtime\venv\Scripts\python.exe",
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return candidates[0]
+
+
+_DEFAULT_TORCH_PYTHON = _resolve_default_torch_python()
 
 
 def torch_python() -> str:

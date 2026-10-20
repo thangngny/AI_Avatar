@@ -50,13 +50,15 @@ from .envutil import env_str
 #   = False; v2/v2.5 family = True (the v3-specific exclusion implies the others
 #   support context). Model-aware: never send context to a model that rejects it.
 MODEL_CAPS: Dict[str, Dict[str, Any]] = {
-    "eleven_v3":              {"settings": ["stability"],          "language_code": True,  "max_text": 5000,  "context": False, "deprecated": False},
+    "eleven_v4":                {"settings": ["stability"],          "language_code": True,  "max_text": 10000, "context": False, "deprecated": False},
+    "eleven_v4_turbo":          {"settings": ["stability"],          "language_code": True,  "max_text": 10000, "context": False, "deprecated": False},
+    "eleven_v3":                {"settings": ["stability"],          "language_code": True,  "max_text": 5000,  "context": False, "deprecated": False},
     "eleven_v3_conversational": {"settings": ["stability"],        "language_code": True,  "max_text": 5000,  "context": False, "deprecated": False},
-    "eleven_multilingual_v2": {"settings": "all",                   "language_code": False, "max_text": 10000, "context": True,  "deprecated": False},
-    "eleven_flash_v2_5":      {"settings": "all",                   "language_code": True,  "max_text": 40000, "context": True,  "deprecated": False},
-    "eleven_turbo_v2_5":      {"settings": "all",                   "language_code": True,  "max_text": 40000, "context": True,  "deprecated": False},
-    "eleven_turbo_v2":        {"settings": "all",                   "language_code": False, "max_text": 30000, "context": True,  "deprecated": True},
-    "eleven_flash_v2":        {"settings": "all",                   "language_code": False, "max_text": 30000, "context": True,  "deprecated": True},
+    "eleven_multilingual_v2":   {"settings": "all",                   "language_code": False, "max_text": 10000, "context": True,  "deprecated": False},
+    "eleven_flash_v2_5":        {"settings": "all",                   "language_code": True,  "max_text": 40000, "context": True,  "deprecated": False},
+    "eleven_turbo_v2_5":        {"settings": "all",                   "language_code": True,  "max_text": 40000, "context": True,  "deprecated": False},
+    "eleven_turbo_v2":          {"settings": "all",                   "language_code": False, "max_text": 30000, "context": True,  "deprecated": True},
+    "eleven_flash_v2":          {"settings": "all",                   "language_code": False, "max_text": 30000, "context": True,  "deprecated": True},
 }
 # High-quality requested output format used on the language-aware path (kept
 # separate from master_storage_format; never a pronunciation lever).
@@ -64,7 +66,51 @@ _HQ_OUTPUT_FORMAT = "mp3_44100_128"
 
 
 def _caps(model_id: str) -> Dict[str, Any]:
-    return MODEL_CAPS.get((model_id or "").strip(), {})
+    mid = (model_id or "").strip()
+    if not mid:
+        return {}
+    if mid in MODEL_CAPS:
+        return MODEL_CAPS[mid]
+    # Dynamic capability inference for newly released or unlisted models (e.g. eleven_v5)
+    try:
+        live_fn = globals().get("_live_model")
+        live = live_fn(mid) if callable(live_fn) else None
+        if live:
+            can_style = bool(live.get("can_use_style", False))
+            can_boost = bool(live.get("can_use_speaker_boost", False))
+            if can_style and can_boost:
+                settings: Any = "all"
+            elif not can_style and not can_boost:
+                settings = ["stability"]
+            else:
+                s_list = ["stability"]
+                if can_style:
+                    s_list.append("style")
+                if can_boost:
+                    s_list.append("use_speaker_boost")
+                settings = s_list
+            max_len = int(live.get("maximum_text_length_per_request") or 10000)
+            lang_code_support = ("multilingual_v2" not in mid)
+            return {
+                "settings": settings,
+                "language_code": lang_code_support,
+                "max_text": max_len,
+                "context": False,
+                "deprecated": False,
+                "dynamic_inferred": True,
+            }
+    except Exception:
+        pass
+    # Safe conservative fallback if API metadata is unreachable
+    is_v2 = "v2" in mid
+    return {
+        "settings": "all" if is_v2 else ["stability"],
+        "language_code": not (mid == "eleven_multilingual_v2"),
+        "max_text": 10000,
+        "context": False,
+        "deprecated": False,
+        "dynamic_inferred": True,
+    }
 
 
 def effective_voice_settings(model_id: str,
@@ -125,17 +171,15 @@ def _key() -> str:
 
 
 def model_id() -> str:
-    """TTS model id for the OFFLINE studio render path.
-
-    The validated production batch (spec section 21) used eleven_turbo_v2_5
-    with voice pGapy9MNHCukzJtjavF0 (Hạnh). The realtime server's
-    ELEVENLABS_MODEL_ID=eleven_v3 is a SEPARATE concern (realtime streaming
-    quality) and is intentionally NOT reused here — the offline batch truth is
-    eleven_turbo_v2_5. An explicit ELEVENLABS_STUDIO_MODEL_ID overrides for
-    testing only. No user-facing control is exposed (spec: do not expose TTS
-    model tuning).
+    """TTS model id for the studio render path.
+    Checks explicit ELEVENLABS_STUDIO_MODEL_ID or ELEVENLABS_MODEL_ID from .env,
+    falling back to eleven_turbo_v2_5 if unspecified.
     """
-    return env_str("ELEVENLABS_STUDIO_MODEL_ID", "eleven_turbo_v2_5")
+    return (
+        env_str("ELEVENLABS_STUDIO_MODEL_ID", "").strip()
+        or env_str("ELEVENLABS_MODEL_ID", "").strip()
+        or "eleven_turbo_v2_5"
+    )
 
 
 def is_configured() -> bool:
@@ -579,6 +623,51 @@ def get_models(refresh: bool = False) -> Dict[str, Any]:
         })
     _cache_set(ck, models, config.ELEVENLABS_MODELS_CACHE_TTL)
     return {"ok": True, "models": models, "cached": False}
+
+
+def get_all_voices(refresh: bool = False) -> Dict[str, Any]:
+    """GET /v1/voices — list of all voices available in the user's ElevenLabs account
+    (including cloned voices, generated voices, and premade voices).
+    Sanitized: API key is never exposed. Cached ~10 min; refresh bypasses cache.
+    """
+    if not is_configured():
+        return {"ok": False, "error": "ElevenLabs API key not configured."}
+    ck = ("all_voices",)
+    if not refresh:
+        c = _cache_get(ck)
+        if c is not None:
+            return {"ok": True, "voices": c, "cached": True}
+    try:
+        url = getattr(config, "ELEVENLABS_VOICES_URL", "https://api.elevenlabs.io/v1/voices")
+        r = requests.get(url, headers=_headers(), timeout=30)
+    except requests.RequestException as e:
+        return {"ok": False, "error": f"Network error: {e}"}
+    if r.status_code != 200:
+        return {"ok": False, "error": f"ElevenLabs returned {r.status_code}", "http_status": r.status_code}
+    try:
+        data = r.json()
+    except ValueError:
+        return {"ok": False, "error": "Unreadable voices response."}
+    voices = []
+    for v in (data.get("voices") or []):
+        vid = v.get("voice_id")
+        if not vid:
+            continue
+        voices.append({
+            "voice_id": vid,
+            "name": v.get("name") or vid,
+            "category": v.get("category") or "premade",
+            "labels": v.get("labels") or {},
+            "description": v.get("description") or "",
+            "preview_url": v.get("preview_url") or "",
+            "high_quality_base_model_ids": v.get("high_quality_base_model_ids") or [],
+            "verified_languages": [
+                L.get("language") for L in (v.get("verified_languages") or [])
+                if isinstance(L, dict) and L.get("language")
+            ],
+        })
+    _cache_set(ck, voices, 600)
+    return {"ok": True, "voices": voices, "cached": False}
 
 
 def model_supports_tts(model_id: str, refresh: bool = False) -> bool:

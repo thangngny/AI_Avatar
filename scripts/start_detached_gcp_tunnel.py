@@ -7,7 +7,17 @@ import time
 
 sys.stdout.reconfigure(encoding="utf-8")
 
-PYTHON_EXE = r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
+def _resolve_python_exe() -> str:
+    for c in [
+        r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+    ]:
+        if os.path.isfile(c):
+            return c
+    return r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
+
+
+PYTHON_EXE = _resolve_python_exe()
 DAEMON_SCRIPT = os.path.join(os.path.dirname(__file__), "gcp_tunnel_daemon.py")
 PID_FILE = os.path.join(os.path.dirname(__file__), "..", "diagnostics", "gcp_tunnel.pid")
 

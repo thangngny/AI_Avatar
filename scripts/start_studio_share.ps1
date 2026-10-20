@@ -57,8 +57,15 @@ Out ("cloudflared: " + (& cloudflared --version 2>$null).Trim())
 
 # Resolve studio python
 if (-not $StudioPy) {
-  $envPy = "C:\CongThang\AI_avatar\latentsync_env\Scripts\python.exe"
-  if (Test-Path $envPy) { $StudioPy = $envPy } else { $StudioPy = "python" }
+  $candidates = @(
+    "D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+    "C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+    (Join-Path (Split-Path $Repo) "runtime\venv\Scripts\python.exe")
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { $StudioPy = $c; break }
+  }
+  if (-not $StudioPy) { $StudioPy = "python" }
 }
 
 # 3. Start Studio if not already running

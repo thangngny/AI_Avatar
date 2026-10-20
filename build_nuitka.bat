@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM ============================================================================
 REM  Nuitka --standalone (onedir) build for LiveTalking (MuseTalk + WebRTC +
 REM  ElevenLabs). Produces dist\app.dist\LiveTalkingServer.exe with an embedded

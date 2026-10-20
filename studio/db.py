@@ -113,6 +113,17 @@ def init_db() -> None:
                     PRIMARY KEY (voice_id, language_code)
                 );
 
+                -- V1.6.3 — custom/user-approved voices from ElevenLabs account / custom input.
+                CREATE TABLE IF NOT EXISTS custom_voices (
+                    voice_id     TEXT PRIMARY KEY,
+                    name         TEXT,
+                    category     TEXT,
+                    description  TEXT,
+                    labels       TEXT,
+                    preview_url  TEXT,
+                    added_at     REAL NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS avatars (
                     avatar_id    TEXT PRIMARY KEY,
                     name         TEXT,
@@ -706,6 +717,89 @@ def delete_profile(voice_id: str, language_code: str) -> bool:
             return cur.rowcount > 0
         finally:
             conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Custom / User Voices (V1.6.3)                                               #
+# --------------------------------------------------------------------------- #
+def save_custom_voice(voice_id: str, name: str = "", category: str = "",
+                      description: str = "", labels: Optional[Dict[str, Any]] = None,
+                      preview_url: str = "") -> None:
+    vid = (voice_id or "").strip()
+    if not vid:
+        return
+    with _LOCK:
+        conn = _connect()
+        try:
+            conn.execute(
+                """
+                INSERT INTO custom_voices (voice_id, name, category, description, labels, preview_url, added_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(voice_id) DO UPDATE SET
+                    name=excluded.name,
+                    category=excluded.category,
+                    description=excluded.description,
+                    labels=excluded.labels,
+                    preview_url=excluded.preview_url,
+                    added_at=excluded.added_at
+                """,
+                (vid, name or vid, category or "custom", description or "",
+                 json.dumps(labels or {}), preview_url or "", time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def list_custom_voices() -> List[Dict[str, Any]]:
+    conn = _connect()
+    try:
+        rows = conn.execute("SELECT * FROM custom_voices ORDER BY added_at DESC").fetchall()
+        out = []
+        for r in rows:
+            lbl = {}
+            try:
+                lbl = json.loads(r["labels"]) if r["labels"] else {}
+            except Exception:
+                pass
+            out.append({
+                "voice_id": r["voice_id"],
+                "name": r["name"],
+                "category": r["category"],
+                "description": r["description"],
+                "labels": lbl,
+                "preview_url": r["preview_url"],
+                "added_at": r["added_at"],
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def delete_custom_voice(voice_id: str) -> bool:
+    vid = (voice_id or "").strip()
+    if not vid:
+        return False
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("DELETE FROM custom_voices WHERE voice_id=?", (vid,))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def is_custom_approved_voice(voice_id: str) -> bool:
+    vid = (voice_id or "").strip()
+    if not vid:
+        return False
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT 1 FROM custom_voices WHERE voice_id=?", (vid,)).fetchone()
+        return bool(row)
+    finally:
+        conn.close()
 
 
 # --------------------------------------------------------------------------- #

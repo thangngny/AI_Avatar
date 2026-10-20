@@ -355,6 +355,75 @@ class TestAPIContract(StudioTestCase):
         # Masked, not full.
         self.assertNotIn(real_key[:8], d.get("elevenlabs_key_masked", ""))
 
+    def test_settings_elevenlabs_get_and_post(self):
+        # 1. GET settings
+        r = self.client.get("/api/settings/elevenlabs")
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertTrue(d["ok"])
+        self.assertIn("model_id", d)
+        self.assertIn("voice_id", d)
+        self.assertIn("max_text_chars", d)
+
+        # 2. POST update model_id to eleven_v4
+        old_model = d.get("model_id")
+        try:
+            r2 = self.client.post("/api/settings/elevenlabs", json={
+                "model_id": "eleven_v4",
+                "max_text_chars": 10000,
+                "sync_profiles": True
+            })
+            self.assertEqual(r2.status_code, 200)
+            d2 = r2.get_json()
+            self.assertTrue(d2["ok"])
+            self.assertEqual(d2["model_id"], "eleven_v4")
+            self.assertEqual(d2["max_text_chars"], 10000)
+        finally:
+            # Restore previous model
+            if old_model:
+                self.client.post("/api/settings/elevenlabs", json={"model_id": old_model})
+
+    def test_elevenlabs_v4_in_model_caps(self):
+        from studio.elevenlabs_client import MODEL_CAPS
+        self.assertIn("eleven_v4", MODEL_CAPS)
+        self.assertIn("eleven_v4_turbo", MODEL_CAPS)
+        self.assertEqual(MODEL_CAPS["eleven_v4"]["max_text"], 10000)
+        self.assertTrue(MODEL_CAPS["eleven_v4"]["language_code"])
+
+    def test_system_status_includes_tts_settings(self):
+        r = self.client.get("/api/system/status")
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertIn("elevenlabs_model_id", d)
+        self.assertIn("elevenlabs_voice_id", d)
+        self.assertIn("tts_max_text_chars", d)
+
+    def test_render_validate_endpoint(self):
+        # 1. Empty payload should fail avatar and script
+        r = self.client.post("/api/render/validate", json={})
+        self.assertEqual(r.status_code, 200)
+        d = r.get_json()
+        self.assertTrue(d["ok"])
+        self.assertFalse(d["can_render"])
+        self.assertGreaterEqual(len(d["checklist"]), 5)
+        self.assertGreaterEqual(d["summary"]["failures"], 2)
+
+        # 2. Valid Edge TTS payload with ready avatar
+        avatars = self.client.get("/api/avatars").get_json()["avatars"]
+        if avatars:
+            ready_av = avatars[0]["avatar_id"]
+            r2 = self.client.post("/api/render/validate", json={
+                "avatar_id": ready_av,
+                "script_text": "Xin chào quý vị khán giả.",
+                "tts_provider": "edge",
+                "voice_id": "vi-VN-HoaiMyNeural"
+            })
+            self.assertEqual(r2.status_code, 200)
+            d2 = r2.get_json()
+            self.assertTrue(d2["ok"])
+            self.assertTrue(d2["can_render"])
+            self.assertEqual(d2["summary"]["failures"], 0)
+
 
 class TestVerify(StudioTestCase):
     def test_missing_file_fails(self):
@@ -1294,6 +1363,89 @@ class TestRendererMasterAudio(StudioTestCase):
         self.assertIn("sf.read(audio_path", src)
         # The locked truth is still loaded (production truth unchanged).
         self.assertIn("load_render_truth", src)
+
+class TestDynamicModelCapability(StudioTestCase):
+    """V1.6.3 — Verify dynamic capability inference for future / unlisted models."""
+
+    def test_unlisted_future_model_infers_caps_from_live(self):
+        from studio import elevenlabs_client as el
+        mock_live_v5 = {
+            "model_id": "eleven_v5",
+            "name": "Eleven v5",
+            "can_do_text_to_speech": True,
+            "can_use_style": False,
+            "can_use_speaker_boost": False,
+            "maximum_text_length_per_request": 15000,
+            "languages": ["vi", "en"],
+        }
+        with _mock.patch.object(el, "_live_model", return_value=mock_live_v5):
+            caps = el._caps("eleven_v5")
+            self.assertEqual(caps["settings"], ["stability"])
+            self.assertEqual(caps["max_text"], 15000)
+            self.assertTrue(caps["language_code"])
+            # Effective voice settings only keeps stability
+            eff = el.effective_voice_settings("eleven_v5", {"stability": 0.7, "style": 0.5, "speed": 1.1})
+            self.assertEqual(eff, {"stability": 0.7})
+            # Language code is preserved for Vietnamese
+            self.assertEqual(el.language_code_for("eleven_v5", "vi"), "vi")
+            # Max text returns live limit
+            self.assertEqual(el.model_max_text("eleven_v5"), 15000)
+
+    def test_unlisted_model_offline_fallback(self):
+        from studio import elevenlabs_client as el
+        with _mock.patch.object(el, "_live_model", return_value=None):
+            caps = el._caps("eleven_v5_offline")
+            self.assertEqual(caps["settings"], ["stability"])
+            self.assertEqual(caps["max_text"], 10000)
+            self.assertTrue(caps["language_code"])
+            self.assertEqual(el.language_code_for("eleven_v5_offline", "vi"), "vi")
+
+
+class TestCustomVoiceWorkflow(StudioTestCase):
+    """V1.6.3 — Verify custom voice registration, approval, and lifecycle."""
+
+    def setUp(self):
+        super().setUp()
+        from studio.app import app
+        app.config["TESTING"] = True
+        self.client = app.test_client()
+
+    def test_custom_voice_registration_and_approval(self):
+        from studio import voices, elevenlabs_client as el
+        mock_chk = {
+            "ok": True,
+            "voice_id": "custom_clone_999",
+            "name": "Giọng Clone Thắng",
+            "category": "cloned",
+            "labels": {"gender": "male", "language": "vi"}
+        }
+        with _mock.patch.object(el, "check_voice", return_value=mock_chk):
+            # 1. Initially not approved
+            self.assertFalse(voices.is_approved_render_voice("custom_clone_999"))
+            
+            # 2. Add via API
+            r = self.client.post("/api/voices/custom", json={
+                "voice_id": "custom_clone_999",
+                "name": "Giọng Clone Thắng",
+                "category": "cloned"
+            })
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.get_json()["ok"])
+            
+            # 3. Now approved
+            self.assertTrue(voices.is_approved_render_voice("custom_clone_999"))
+            
+            # 4. List contains custom voice
+            r_list = self.client.get("/api/voices/custom")
+            self.assertEqual(r_list.status_code, 200)
+            vids = [v["voice_id"] for v in r_list.get_json()["voices"]]
+            self.assertIn("custom_clone_999", vids)
+            
+            # 5. Delete custom voice
+            r_del = self.client.delete("/api/voices/custom/custom_clone_999")
+            self.assertEqual(r_del.status_code, 200)
+            self.assertTrue(r_del.get_json()["ok"])
+            self.assertFalse(voices.is_approved_render_voice("custom_clone_999"))
 
 
 if __name__ == "__main__":

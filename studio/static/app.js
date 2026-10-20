@@ -352,18 +352,18 @@ function renderHome() {
   el.innerHTML = `
     <div class="home-hero">
       <h1>Tạo video với AI Avatar</h1>
-      <p>Chọn một trong hai cách bắt đầu bên dưới. Bạn không cần kiến thức kỹ thuật — hệ thống lo phần còn lại.</p>
+      <p>Chọn cách bắt đầu bên dưới để tạo video hoặc khởi tạo nhân vật AI mới.</p>
       <div class="home-cards">
         <div class="home-card" onclick="switchView('quick')">
           <div class="hc-icon">${ICO.video}</div>
-          <div class="hc-title">Tạo video từ Avatar có sẵn</div>
-          <div class="hc-desc">Chọn Avatar → Nhập nội dung → Chọn giọng → Render video. Dùng khi bạn đã có Avatar phù hợp.</div>
+          <div class="hc-title">Tạo video</div>
+          <div class="hc-desc">Chọn Avatar, nhập kịch bản và tạo video hoàn chỉnh với giọng đọc AI.</div>
           <span class="hc-cta">BẮT ĐẦU ${ICO.arrow}</span>
         </div>
         <div class="home-card alt" onclick="switchView('create')">
           <div class="hc-icon">${ICO.avatar}</div>
-          <div class="hc-title">Tạo AI Avatar mới</div>
-          <div class="hc-desc">Upload video của một người để tạo Avatar mới. Hệ thống tự động kiểm tra chất lượng video giúp bạn.</div>
+          <div class="hc-title">Tạo Avatar mới</div>
+          <div class="hc-desc">Tải video chân dung để hệ thống tự động khởi tạo nhân vật AI mới.</div>
           <span class="hc-cta">TẠO AVATAR ${ICO.arrow}</span>
         </div>
       </div>
@@ -372,10 +372,10 @@ function renderHome() {
           ${ICO.avatar}<div>Thư viện Avatar<div class="hs-sub">${ready} Avatar sẵn sàng</div></div>
         </div>
         <div class="home-sec" onclick="switchView('history')">
-          ${ICO.history}<div>Lịch sử render<div class="hs-sub">Video đã tạo</div></div>
+          ${ICO.history}<div>Lịch sử video<div class="hs-sub">Video đã tạo</div></div>
         </div>
         <div class="home-sec" onclick="switchView('status')">
-          ${ICO.check}<div>Trạng thái hệ thống<div class="hs-sub">Kiểm tra nhanh</div></div>
+          ${ICO.check}<div>Trạng thái hệ thống<div class="hs-sub">Kiểm tra kết nối</div></div>
         </div>
       </div>
     </div>`;
@@ -396,8 +396,8 @@ async function renderQuick() {
   const el = $("#content");
   const readyAvs = state.avatars.filter(a => a.ready);
   el.innerHTML = `
-    <h1 class="view-title">Tạo video từ Avatar có sẵn</h1>
-    <p class="view-sub">Làm theo 5 bước — mỗi bước một việc.</p>
+    <h1 class="view-title">Tạo video</h1>
+    <p class="view-sub">Tạo video hoàn chỉnh với Avatar và giọng đọc AI chỉ qua vài bước.</p>
     ${quickStepperHTML()}
     <div class="steps wizard">
 
@@ -419,33 +419,30 @@ async function renderQuick() {
           <div class="script-editor-container">
             <div class="script-toolbar">
               <div class="st-left">
-                <span class="st-title">Nội dung kịch bản AI</span>
-                <span class="st-badge">Hỗ trợ kịch bản dài</span>
+                <span class="st-title">Nội dung kịch bản</span>
               </div>
               <div class="st-actions">
                 <button type="button" class="tiny ghost" onclick="adjustScriptFontSize(-1)" title="Giảm cỡ chữ">A-</button>
                 <button type="button" class="tiny ghost" onclick="adjustScriptFontSize(1)" title="Tăng cỡ chữ">A+</button>
-                <button type="button" class="tiny ghost" onclick="toggleScriptFullscreen()" id="btnFullscreenScript" title="Chế độ toàn màn hình tập trung">⛶ Phóng to</button>
-                <button type="button" class="tiny ghost" onclick="pasteFromClipboard()" title="Dán nội dung từ bộ nhớ tạm">📋 Dán kịch bản</button>
+                <button type="button" class="tiny ghost" onclick="toggleScriptFullscreen()" id="btnFullscreenScript" title="Phóng to toàn màn hình">⛶ Phóng to</button>
+                <button type="button" class="tiny ghost" onclick="pasteFromClipboard()" title="Dán nội dung từ bộ nhớ tạm">📋 Dán</button>
                 <label class="tiny ghost file-btn-label" title="Tải file kịch bản (.txt, .docx)">
-                  📁 Tải file Word/Text
+                  📁 Tải file
                   <input type="file" id="qFile" accept=".txt,.docx" style="display:none" />
                 </label>
-                <button type="button" class="tiny ghost" onclick="insertSampleScript()" title="Chèn kịch bản mẫu tiếng Việt">✨ Kịch bản mẫu</button>
-                <button type="button" class="tiny ghost danger-text" onclick="clearScript()" title="Xóa toàn bộ văn bản">🧹 Xóa trắng</button>
+                <button type="button" class="tiny ghost" onclick="insertSampleScript()" title="Chèn kịch bản mẫu">✨ Kịch bản mẫu</button>
+                <button type="button" class="tiny ghost danger-text" onclick="clearScript()" title="Xóa toàn bộ văn bản">🧹 Xóa</button>
               </div>
             </div>
 
-            <textarea id="qScript" class="script-canvas font-md" rows="18" placeholder="Nhập hoặc dán trực tiếp kịch bản / nội dung phát biểu tại đây…
-Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự động tính toán thời lượng đọc chuẩn tiếng Việt."></textarea>
+            <textarea id="qScript" class="script-canvas font-md" rows="18" placeholder="Nhập hoặc dán nội dung kịch bản tại đây..."></textarea>
 
             <div id="qScriptInfo" class="script-info-bar"></div>
           </div>
 
           <div class="script-split-section" style="margin-top:16px">
             <div class="row between" style="align-items:center;margin-bottom:8px">
-              <label style="margin:0;font-weight:600;font-size:13px">Phân đoạn & Độ dài video</label>
-              <div class="muted2" style="font-size:12px">Tùy chọn tạo toàn bộ hoặc trích đoạn nhanh</div>
+              <label style="margin:0;font-weight:600;font-size:13px">Độ dài video</label>
             </div>
             <div class="split-chips" id="splitChips">
               <span class="schip ${state.splitMode==='full'?'active':''}" data-m="full" onclick="setSplitMode('full')">🎬 Toàn bộ kịch bản</span>
@@ -465,11 +462,11 @@ Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự
       </div>
 
       <div class="step" data-step="3">
-        <div class="step-head" onclick="quickGoto(3)"><div class="step-num">3</div><div class="step-title">Giọng</div><div class="step-summary"></div></div>
+        <div class="step-head" onclick="quickGoto(3)"><div class="step-num">3</div><div class="step-title">Chọn giọng đọc</div><div class="step-summary"></div></div>
         <div class="step-body">
           <div class="tts-tabs" id="ttsTabs">
-            <button class="tts-tab ${state.ttsProvider === 'elevenlabs' ? 'active' : ''}" data-p="elevenlabs">ELEVENLABS<span class="tt-sub">Giọng chất lượng cao</span></button>
-            <button class="tts-tab ${state.ttsProvider === 'edge' ? 'active' : ''}" data-p="edge">TEST MIỄN PHÍ<span class="tt-sub">Edge TTS — dùng để kiểm tra</span></button>
+            <button class="tts-tab ${state.ttsProvider === 'elevenlabs' ? 'active' : ''}" data-p="elevenlabs">🎙️ ELEVENLABS<span class="tt-sub">Chất lượng cao</span></button>
+            <button class="tts-tab ${state.ttsProvider === 'edge' ? 'active' : ''}" data-p="edge">🆓 TEST MIỄN PHÍ<span class="tt-sub">Edge TTS</span></button>
           </div>
           <div class="tts-subnote" id="ttsSubnote"></div>
           <div id="ttsPanel"></div>
@@ -479,30 +476,29 @@ Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự
       </div>
 
       <div class="step" data-step="4">
-        <div class="step-head" onclick="quickGoto(4)"><div class="step-num">4</div><div class="step-title">Kiểm tra khẩu hình & giọng</div><div class="step-summary"></div></div>
+        <div class="step-head" onclick="quickGoto(4)"><div class="step-num">4</div><div class="step-title">Kiểm tra xem thử</div><div class="step-summary"></div></div>
         <div class="step-body">
-          <div class="hint" style="margin-bottom:12px">Kiểm tra nhanh chuyển động môi hoặc nghe thử giọng đọc trước khi tạo video đầy đủ (tùy chọn).</div>
+          <div class="hint" style="margin-bottom:14px">Xem trước chuyển động môi hoặc nghe thử giọng đọc trước khi tạo video hoàn chỉnh (tùy chọn).</div>
           <div class="test-opt-grid">
             <div class="test-opt-card">
-              <div class="test-opt-title"><span class="tag muted">MIỄN PHÍ</span> Test khẩu hình môi</div>
-              <div class="test-opt-desc">Dùng giọng đọc test Edge TTS (không tốn hạn mức ElevenLabs). Dùng để kiểm tra chuyển động môi của Avatar có tự nhiên và khớp khẩu hình không.</div>
-              <button class="secondary" id="qMouthBtn" onclick="renderMouthTest()" style="margin-top:auto">TEST KHẨU HÌNH (MIỄN PHÍ)</button>
+              <div class="test-opt-title"><span class="tag muted">MIỄN PHÍ</span> Thử khẩu hình môi</div>
+              <div class="test-opt-desc">Tạo video ngắn kiểm tra chuyển động môi khớp khuôn mặt mà không tốn hạn mức giọng đọc.</div>
+              <button class="secondary" id="qMouthBtn" onclick="renderMouthTest()" style="margin-top:auto">Thử khẩu hình (Miễn phí)</button>
             </div>
             <div class="test-opt-card">
-              <div class="test-opt-title"><span class="tag good">CHÍNH XÁC</span> Kiểm tra 10 giây đầu</div>
-              <div class="test-opt-desc">Dùng chính xác giọng ElevenLabs và đoạn đầu kịch bản để tạo 10 giây video. Kiểm tra chất lượng phát âm và hình ảnh thực tế.</div>
-              <button class="ghost" id="qTestBtn" onclick="renderTest10s()" style="margin-top:auto">Kiểm tra 10 giây</button>
+              <div class="test-opt-title"><span class="tag good">CHÍNH XÁC</span> Xem thử 10 giây</div>
+              <div class="test-opt-desc">Tạo 10 giây video đầu tiên với giọng đọc chính thức để xem trước chất lượng thực tế.</div>
+              <button class="ghost" id="qTestBtn" onclick="renderTest10s()" style="margin-top:auto">Xem thử 10 giây</button>
             </div>
           </div>
           <details class="tech" style="margin-top:12px">
-            <summary>Tùy chỉnh đoạn kịch bản test chuẩn</summary>
+            <summary>Kịch bản kiểm tra mẫu</summary>
             <div style="margin-top:10px">
               <textarea id="qMouthScript" rows="2">${esc(STANDARD_MOUTH_TEST_SCRIPT)}</textarea>
-              <div class="actions"><button class="tiny ghost" onclick="useStandardMouthScript()">Dùng đoạn test chuẩn</button></div>
-              <div class="hint" style="margin-top:6px">Đoạn test chuẩn chứa đầy đủ các nguyên âm và phụ âm môi (m, b, p) để đánh giá độ khớp khẩu hình chuẩn xác nhất.</div>
+              <div class="actions"><button class="tiny ghost" onclick="useStandardMouthScript()">Dùng đoạn mẫu mặc định</button></div>
             </div>
           </details>
-          <div class="actions"><button class="ghost" onclick="quickGoto(3)">Quay lại</button><button class="primary" onclick="quickGoto(5)">Bỏ qua, tạo video</button></div>
+          <div class="actions"><button class="ghost" onclick="quickGoto(3)">Quay lại</button><button class="primary" onclick="quickGoto(5)">Bỏ qua, tạo video ngay ➔</button></div>
         </div>
       </div>
 
@@ -510,11 +506,15 @@ Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự
         <div class="step-head" onclick="quickGoto(5)"><div class="step-num">5</div><div class="step-title">Tạo video</div><div class="step-summary"></div></div>
         <div class="step-body">
           <div id="qReview" class="review-grid"></div>
-          <div class="hint" style="margin-bottom:12px">Khi đã hài lòng với bước kiểm tra, tạo video hoàn chỉnh.</div>
+          <div class="field-group" style="margin-top:16px;margin-bottom:14px">
+            <label for="qVideoName" style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Tên video (tùy chọn)</label>
+            <input id="qVideoName" type="text" placeholder="Ví dụ: Giới thiệu sản phẩm, Bản tin sáng, Video quảng cáo..." maxlength="120" style="width:100%;box-sizing:border-box" />
+            <div class="hint" style="margin-top:4px;font-size:11px">Đặt tên giúp bạn dễ tìm kiếm lại trong Lịch sử video.</div>
+          </div>
           <div class="actions">
             <button class="ghost" onclick="quickGoto(4)">Quay lại</button>
             <button class="primary big" id="qRenderBtn" onclick="renderFull()">TẠO VIDEO</button>
-            <span class="muted" style="font-size:11px;align-self:center">Ctrl+Enter = tạo video</span>
+            <span class="muted" style="font-size:12px;align-self:center">(Phím tắt: Ctrl+Enter)</span>
           </div>
         </div>
       </div>
@@ -533,10 +533,7 @@ Hệ thống hỗ trợ kịch bản dài không giới hạn số từ và tự
       <button class="ghost" onclick="switchView('create')">＋ Tạo AI Avatar trước</button></div>`;
   } else {
     sel.innerHTML = `<option value="">— Chọn Avatar —</option>` +
-      readyAvs.map(a => {
-        const q = qMeta(a.quality_status).short;
-        return `<option value="${esc(a.avatar_id)}">${esc(a.avatar_id)} · ${q} · ${esc(TYPE_VI[a.avatar_type] || a.avatar_type)}</option>`;
-      }).join("");
+      readyAvs.map(a => `<option value="${esc(a.avatar_id)}">${esc(a.avatar_id)} · Sẵn sàng · ${esc(TYPE_VI[a.avatar_type] || a.avatar_type)}</option>`).join("");
   }
   sel.onchange = () => {
     const a = state.avatars.find(x => x.avatar_id === sel.value);
@@ -637,24 +634,129 @@ function quickRefresh() {
   set('qNext2', !!state.scriptText.trim());
   set('qNext3', quickVoiceReady());
   // review summary on step 5
+  // Pre-flight Checklist validation on step 5
   const rev = document.getElementById('qReview');
   if (rev) {
-    const av = state.selectedAvatar ? state.selectedAvatar.avatar_id : "—";
-    const words = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0;
-    const voice = state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId || "—");
-    let cfgSrc = "";
-    if (state.ttsProvider !== "edge") {
-      const c = state.voiceConfig;
-      if (!c) cfgSrc = "Cấu hình Studio";
-      else if (c.match_strength === "history_item") cfgSrc = "Khớp bản ElevenLabs";
-      else if (c.match_strength === "history_matched") cfgSrc = "Đã đồng bộ ElevenLabs";
-      else if (c.match_strength === "settings_only") cfgSrc = "Cài đặt giọng (Model Studio)";
-      else if (c.match_strength === "manual") cfgSrc = "Tùy chỉnh";
+    if (state.quickStep === 5) {
+      refreshPreflightChecklist();
+    } else {
+      const av = state.selectedAvatar ? state.selectedAvatar.avatar_id : "—";
+      const words = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0;
+      const voice = state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId || "—");
+      rev.innerHTML = `<div class="rv"><span class="rv-k">Avatar</span><span class="rv-v">${esc(av)}</span></div>
+        <div class="rv"><span class="rv-k">Nội dung</span><span class="rv-v">${words} từ</span></div>
+        <div class="rv"><span class="rv-k">Giọng</span><span class="rv-v">${esc(voice)}</span></div>`;
     }
-    rev.innerHTML = `<div class="rv"><span class="rv-k">Avatar</span><span class="rv-v">${esc(av)}</span></div>
-      <div class="rv"><span class="rv-k">Nội dung</span><span class="rv-v">${words} từ</span></div>
-      <div class="rv"><span class="rv-k">Giọng</span><span class="rv-v">${esc(voice)}</span></div>
-      ${cfgSrc ? `<div class="rv"><span class="rv-k">Nguồn cấu hình</span><span class="rv-v">${esc(cfgSrc)}</span></div>` : ""}`;
+  }
+}
+
+let _preflightTimer = null;
+let _lastPreflightResult = null;
+
+async function refreshPreflightChecklist(force = false) {
+  const rev = document.getElementById('qReview');
+  if (!rev) return;
+
+  const avId = (state.selectedAvatar ? state.selectedAvatar.avatar_id : ($("#qAvatar") && $("#qAvatar").value)) || "";
+  const scriptText = (state.scriptText || "").trim();
+  const provider = state.ttsProvider || "elevenlabs";
+  const voiceId = activeVoiceId() || "";
+  const modelId = ($("#qModelSelect") && $("#qModelSelect").value) || state.selectedModel || state.voiceConfig?.model_id || "eleven_v4";
+  const lang = state.targetLanguage || "vi";
+
+  // Show lightweight loading indicator if empty
+  if (!rev.querySelector(".preflight-box")) {
+    rev.innerHTML = `
+      <div class="preflight-box">
+        <div class="preflight-header">
+          <div class="preflight-title"><span>📋</span> <span>Kiểm tra điều kiện trước khi Render</span></div>
+          <span class="preflight-badge warn">Đang kiểm tra…</span>
+        </div>
+        <div class="muted" style="padding:10px 0;font-size:13px"><span class="spinner"></span> Đang đối chiếu tính hợp lệ của Avatar, kịch bản, model giọng và quota…</div>
+      </div>`;
+  }
+
+  try {
+    const res = await api("/api/render/validate", {
+      method: "POST",
+      body: JSON.stringify({
+        avatar_id: avId,
+        script_text: scriptText,
+        tts_provider: provider,
+        voice_id: voiceId,
+        model_id: modelId,
+        target_language: lang
+      })
+    });
+
+    if (res && res.ok) {
+      _lastPreflightResult = res;
+      renderPreflightUI(res);
+    }
+  } catch (e) {
+    // Keep UI responsive even if network glitches
+  }
+}
+
+function renderPreflightUI(res) {
+  const rev = document.getElementById('qReview');
+  if (!rev) return;
+
+  const sum = res.summary || {};
+  const list = res.checklist || [];
+  const canRender = !!res.can_render;
+
+  const badgeClass = sum.headline_type || (canRender ? "good" : "bad");
+  const badgeText = canRender ? (sum.warnings ? "CÓ THỂ TẠO VIDEO" : "ĐỦ ĐIỀU KIỆN") : "CHƯA ĐỦ ĐIỀU KIỆN";
+
+  const rowsHtml = list.map(item => {
+    let icon = "✅";
+    let statusClass = "good";
+    if (item.status === "WARN") { icon = "⚠️"; statusClass = "warn"; }
+    else if (item.status === "FAIL") { icon = "❌"; statusClass = "bad"; }
+
+    let fixBtn = "";
+    if (item.step) {
+      fixBtn = `<button type="button" class="preflight-fix-btn" onclick="quickGoto(${item.step})">Sửa bước ${item.step}</button>`;
+    }
+
+    return `
+      <div class="preflight-item">
+        <div class="preflight-icon">${icon}</div>
+        <div class="preflight-content">
+          <div class="preflight-item-title">
+            <span>${esc(item.title)}</span>
+            ${fixBtn}
+          </div>
+          <div class="preflight-item-msg">${esc(item.message)}</div>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  rev.innerHTML = `
+    <div class="preflight-box">
+      <div class="preflight-header">
+        <div class="preflight-title">
+          <span>📋</span>
+          <span>Kiểm tra điều kiện tạo video</span>
+        </div>
+        <div class="row" style="gap:8px">
+          <span class="preflight-badge ${badgeClass}">${badgeText}</span>
+          <button type="button" class="ghost tiny" onclick="refreshPreflightChecklist(true)" title="Kiểm tra lại">🔄 Kiểm tra lại</button>
+        </div>
+      </div>
+      <div class="preflight-list">
+        ${rowsHtml}
+      </div>
+    </div>
+  `;
+
+  // Control Render button
+  const btn = document.getElementById("qRenderBtn");
+  if (btn) {
+    btn.disabled = !canRender;
+    btn.title = canRender ? "Bắt đầu tạo video" : "Vui lòng hoàn thành các mục trước khi tạo video";
   }
 }
 function quickGoto(n) {
@@ -667,17 +769,118 @@ function quickGoto(n) {
   $("#content").scrollTop = 0;
 }
 
+const BASE_MODEL_OPTIONS = [
+  { id: "eleven_v4", name: "⭐ Eleven v4 (Mới nhất · Biểu cảm chân thực nhất)" },
+  { id: "eleven_v4_turbo", name: "⚡ Eleven v4 Turbo (Độ trễ thấp ~100ms)" },
+  { id: "eleven_v3", name: "Eleven v3 (Chuẩn đàm thoại tự nhiên)" },
+  { id: "eleven_v3_conversational", name: "Eleven v3 Conversational (Giao tiếp hội thoại)" },
+  { id: "eleven_multilingual_v2", name: "Eleven Multilingual v2 (Đa ngôn ngữ ổn định)" },
+  { id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5 (Tối ưu tốc độ)" },
+  { id: "eleven_flash_v2_5", name: "Eleven Flash v2.5 (Siêu tốc ~75ms)" },
+];
+
+let _cachedLiveModels = null;
+
+async function fetchLiveTTSModels() {
+  if (_cachedLiveModels) return _cachedLiveModels;
+  try {
+    const res = await api("/api/elevenlabs/models");
+    if (res && res.ok && Array.isArray(res.models)) {
+      _cachedLiveModels = res.models.filter(m => m.can_do_text_to_speech && !m.deprecated);
+      return _cachedLiveModels;
+    }
+  } catch (e) {}
+  return [];
+}
+
+function setSelectModelValue(selectEl, modelId) {
+  if (!selectEl || !modelId) return;
+  const mid = modelId.trim();
+  const exists = Array.from(selectEl.options).some(o => o.value === mid);
+  if (!exists) {
+    const opt = document.createElement("option");
+    opt.value = mid;
+    opt.textContent = `✨ ${mid} (Mới)`;
+    const customOpt = Array.from(selectEl.options).find(o => o.value === "__custom__");
+    if (customOpt) selectEl.insertBefore(opt, customOpt);
+    else selectEl.appendChild(opt);
+  }
+  selectEl.value = mid;
+}
+
+function initModelDropdown(selectEl, curMid, onSelectModel) {
+  if (!selectEl) return;
+  curMid = (curMid || "eleven_v4").trim();
+
+  let list = BASE_MODEL_OPTIONS.map(m => ({ ...m }));
+  if (curMid && !list.some(m => m.id === curMid)) {
+    list.unshift({ id: curMid, name: `Model đang chọn: ${curMid}` });
+  }
+
+  function renderList(selVal) {
+    let html = list.map(m => {
+      const isSel = (m.id === selVal);
+      return `<option value="${esc(m.id)}" ${isSel ? 'selected' : ''}>${esc(m.name)}</option>`;
+    }).join("");
+    html += `<option value="__custom__">➕ Tự nhập Model ID khác...</option>`;
+    selectEl.innerHTML = html;
+    selectEl.value = selVal;
+  }
+
+  renderList(curMid);
+
+  selectEl.onchange = async () => {
+    const val = selectEl.value;
+    if (val === "__custom__") {
+      const customId = prompt("Nhập mã Model ID từ ElevenLabs (ví dụ: eleven_v5, eleven_v5_turbo, custom fine-tune):", "");
+      if (customId && customId.trim()) {
+        const cleanId = customId.trim();
+        if (!list.some(m => m.id === cleanId)) {
+          list.unshift({ id: cleanId, name: `✨ ${cleanId} (Tự nhập)` });
+        }
+        renderList(cleanId);
+        curMid = cleanId;
+        if (typeof onSelectModel === "function") await onSelectModel(cleanId);
+      } else {
+        selectEl.value = curMid;
+      }
+      return;
+    }
+    curMid = val;
+    if (typeof onSelectModel === "function") await onSelectModel(val);
+  };
+
+  fetchLiveTTSModels().then(liveModels => {
+    if (!liveModels || !liveModels.length) return;
+    let added = false;
+    liveModels.forEach(lm => {
+      const mid = lm.model_id;
+      if (!list.some(m => m.id === mid)) {
+        const kChars = lm.maximum_text_length_per_request ? ` · ${(lm.maximum_text_length_per_request/1000).toFixed(0)}k ký tự` : "";
+        list.push({
+          id: mid,
+          name: `✨ ${lm.name || mid} (Mới từ ElevenLabs${kChars})`
+        });
+        added = true;
+      }
+    });
+    if (added) {
+      renderList(curMid || selectEl.value);
+    }
+  });
+}
+
 function renderTTSPanel() {
   const panel = $("#ttsPanel"); if (!panel) return;
   const note = $("#ttsSubnote");
   if (state.ttsProvider === "edge") {
-    if (note) note.innerHTML = `<span class="tag muted">TEST MIỄN PHÍ — EDGE TTS</span> <span class="muted">Giọng test miễn phí, không tốn quota. Chỉ dùng để kiểm tra khẩu hình.</span>`;
+    if (note) note.innerHTML = `<span class="tag muted">DÙNG THỬ</span> <span class="muted">Miễn phí, không tốn hạn mức. Thích hợp kiểm tra chuyển động môi.</span>`;
     const opts = (state.edgeVoices.length ? state.edgeVoices : [
       { voice_id: "vi-VN-HoaiMyNeural", label: "Nữ — Hoài My" },
       { voice_id: "vi-VN-NamMinhNeural", label: "Nam — Nam Minh" },
     ]).map(v => `<option value="${esc(v.voice_id)}" ${v.voice_id === state.edgeVoice ? 'selected' : ''}>${esc(v.label)}</option>`).join("");
     panel.innerHTML = `
-      <label>Giọng test</label>
+      <label style="font-weight:600;font-size:13px;margin-bottom:6px">Chọn giọng dùng thử</label>
       <div class="row">
         <select id="qEdgeVoice" style="flex:1">${opts}</select>
         <button class="ghost" onclick="previewEdgeVoice()">▶ Nghe thử</button>
@@ -686,37 +889,82 @@ function renderTTSPanel() {
     const esel = $("#qEdgeVoice");
     if (esel) esel.onchange = (e) => { state.edgeVoice = e.target.value; ls.set("studio_edge_voice", e.target.value); };
   } else {
-    if (note) note.innerHTML = `<span class="tag good">ELEVENLABS</span> <span class="muted">Giọng production chất lượng cao. Studio tự chọn cấu hình phù hợp cho từng giọng và ngôn ngữ.</span>`;
+    if (note) note.innerHTML = `<span class="tag good">ElevenLabs</span> <span class="muted">Giọng đọc AI chất lượng cao.</span>`;
     panel.innerHTML = `
-      <label>Chọn giọng</label>
+      <label style="font-weight:600;font-size:13px;margin-bottom:8px">Giọng đọc gợi ý</label>
       <div id="qVoiceCards" class="voice-cards"></div>
       <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>
-      <label style="display:block;margin-top:10px">Ngôn ngữ</label>
-      <select id="qLang" style="margin-top:4px;max-width:260px">
-        <option value="vi">Tiếng Việt</option>
-        <option value="auto">Tự động (phát hiện theo kịch bản)</option>
-        <option value="en">English</option>
-        <option value="ja">日本語</option>
-        <option value="zh">中文</option>
-      </select>
+
+      <!-- Thư viện giọng từ tài khoản ElevenLabs -->
+      <div class="voice-account-box" style="margin-top:14px;background:var(--card,#1a1a1f);border:1px solid var(--border,#333);border-radius:8px;padding:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <span style="font-weight:600;font-size:13px">🎙️ Giọng từ tài khoản ElevenLabs</span>
+          <button type="button" class="ghost tiny" onclick="loadAccountVoices(true)">🔄 Tải lại</button>
+        </div>
+        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
+          <select id="qAccountVoicesSelect" style="flex:1;min-width:240px" onchange="onAccountVoiceDropdownChange()">
+            <option value="">— Đang tải danh sách giọng… —</option>
+          </select>
+          <button type="button" class="primary tiny" onclick="applyAccountVoiceSelection()">Dùng giọng này</button>
+          <button type="button" class="ghost tiny" id="qAccountVoicePreviewBtn" style="display:none" onclick="playAccountVoicePreview()">▶ Nghe mẫu</button>
+        </div>
+        <div id="qAccountVoiceDesc" class="muted" style="font-size:12px;margin-top:6px"></div>
+
+        <div style="margin-top:10px;border-top:1px dashed var(--border,#333);padding-top:10px">
+          <div class="row" style="gap:8px">
+            <input id="qCustomVoiceInput" type="text" placeholder="Hoặc dán mã Voice ID khác từ ElevenLabs..." style="flex:1;font-size:13px" />
+            <button type="button" class="secondary tiny" onclick="submitCustomVoiceInput()">Thêm giọng</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:14px;gap:12px;align-items:flex-start;flex-wrap:wrap">
+        <div style="flex:1;min-width:260px">
+          <label style="display:block;margin-bottom:4px;font-weight:600">Mô hình AI Voice (Model)</label>
+          <select id="qModelSelect" style="width:100%"></select>
+          <div class="hint" style="font-size:11px">Khuyến nghị: <b>Eleven v4</b> (biểu cảm tự nhiên nhất, hỗ trợ tiếng Việt).</div>
+        </div>
+        <div style="width:180px">
+          <label style="display:block;margin-bottom:4px;font-weight:600">Ngôn ngữ</label>
+          <select id="qLang" style="width:100%">
+            <option value="vi">Tiếng Việt</option>
+            <option value="auto">Tự động (phát hiện theo kịch bản)</option>
+            <option value="en">English</option>
+            <option value="ja">日本語</option>
+            <option value="zh">中文</option>
+          </select>
+        </div>
+      </div>
+
       <div id="qLangInfo" style="margin-top:6px;font-size:12px"></div>
       <div id="qVoiceSync" style="margin-top:8px;font-size:12px"></div>
       <div id="scriptPreviewBox" class="script-preview-box"></div>
       <details class="tech" style="margin-top:10px">
-        <summary>Cấu hình giọng — đồng bộ ElevenLabs</summary>
+        <summary>Tùy chỉnh nâng cao (Tùy chọn)</summary>
         <div style="margin-top:10px">
           <div class="tts-tabs" id="syncTabs" style="margin-bottom:10px">
-            <button class="sync-tab active" data-m="auto_current">Cấu hình hiện tại</button>
+            <button class="sync-tab active" data-m="auto_current">Cấu hình tự động</button>
             <button class="sync-tab" data-m="history_match">Khớp bản đã tạo</button>
             <button class="sync-tab" data-m="manual">Tùy chỉnh</button>
           </div>
           <div id="syncPanel"></div>
-          <div class="hint" style="margin-top:8px">Kết quả có thể có khác biệt nhỏ giữa các lần tạo vì TTS là mô hình sinh nội dung.</div>
         </div>
       </details>`;
-    // V1.6.0: the normal Render flow exposes exactly the two approved ElevenLabs
-    // voices (no free-text Voice ID input). Names come from official metadata.
     renderVoiceCards();
+    loadAccountVoices();
+    const msel = $("#qModelSelect");
+    if (msel) {
+      const curMid = state.voiceConfig?.model_id || state.selectedModel || state.status?.elevenlabs_model_id || "eleven_v4";
+      initModelDropdown(msel, curMid, async (chosen) => {
+        state.selectedModel = chosen;
+        ls.set("studio_selected_model", chosen);
+        if (state.voiceId && state.voiceChecked) {
+          await applyChosenModel(chosen);
+        } else {
+          quickRefresh();
+        }
+      });
+    }
     const lng = $("#qLang"); if (lng) {
       lng.value = state.targetLanguage || "vi";
       // V1.6.0: changing the target language re-resolves the config (the same
@@ -762,14 +1010,14 @@ function renderVoiceSync() {
   }
   const ms = c.match_strength;
   let line = "";
-  if (ms === "human_approved_profile") line = `<span class="tag good">✓ Cấu hình giọng đã được xác nhận cho Tiếng Việt</span> <span class="muted">· Đã xác nhận bằng kiểm thử nghe</span>`;
-  else if (ms === "verified_language_policy" || ms === "language_policy") line = `<span class="tag good">✓ Đã chọn cấu hình tương thích với Tiếng Việt</span>`;
-  else if (ms === "history_item")      line = `<span class="tag good">✓ Đã khớp cấu hình bản ElevenLabs đã tạo</span>`;
-  else if (ms === "history_matched") line = `<span class="tag good">✓ Đã đồng bộ cấu hình ElevenLabs</span>`;
-  else if (ms === "settings_only")   line = `<span class="tag good">✓ Đã đồng bộ cài đặt giọng</span> <span class="muted">· Model đầu ra đang dùng cấu hình Studio</span>`;
-  else if (ms === "manual")          line = `<span class="tag good">✓ Đang dùng cấu hình tùy chỉnh</span>`;
+  if (ms === "human_approved_profile") line = `<span class="tag good">✓ Đã tối ưu cho Tiếng Việt</span>`;
+  else if (ms === "verified_language_policy" || ms === "language_policy") line = `<span class="tag good">✓ Tương thích Tiếng Việt</span>`;
+  else if (ms === "history_item")      line = `<span class="tag good">✓ Khớp cấu hình ElevenLabs</span>`;
+  else if (ms === "history_matched") line = `<span class="tag good">✓ Đã đồng bộ ElevenLabs</span>`;
+  else if (ms === "settings_only")   line = `<span class="tag good">✓ Đã áp dụng cài đặt giọng</span>`;
+  else if (ms === "manual")          line = `<span class="tag good">✓ Cấu hình tùy chỉnh</span>`;
   else line = `<span class="muted">Cấu hình: ${esc(ms || "—")}</span>`;
-  box.innerHTML = `${line}<div class="muted2" style="margin-top:2px">Model đang dùng: ${esc(c.model_id || "—")}${c.voice_name ? " · " + esc(c.voice_name) : ""}</div>`;
+  box.innerHTML = `${line} <span class="muted2">· Model: ${esc(c.model_id || "—")}${c.voice_name ? " (" + esc(c.voice_name) + ")" : ""}</span>`;
 }
 function renderSyncPanel() {
   const panel = $("#syncPanel"); if (!panel) return;
@@ -785,8 +1033,18 @@ function renderSyncPanel() {
     const f = (x) => (x == null ? "" : x);
     panel.innerHTML = `<div class="hint">Nâng cao — tự chỉnh cấu hình TTS. Thay đổi sẽ ghi đè cấu hình đồng bộ.</div>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
-        <label>Model <input id="mModel" value="${esc(f(c.model_id))}" placeholder="eleven_multilingual_v2" style="width:200px"/></label>
-        <label>Output <input id="mOut" value="${esc(f(c.requested_output_format))}" placeholder="mp3_44100_128" style="width:160px"/></label>
+        <label>Model
+          <select id="mModel" style="width:230px;padding:4px 8px;background:var(--bg2,#1f1f24);color:var(--text);border:1px solid var(--border,#444);border-radius:4px">
+            <option value="eleven_v4" ${c.model_id==='eleven_v4'?'selected':''}>Eleven v4 (Mới nhất · 10k chars)</option>
+            <option value="eleven_v4_turbo" ${c.model_id==='eleven_v4_turbo'?'selected':''}>Eleven v4 Turbo (~100ms)</option>
+            <option value="eleven_v3" ${c.model_id==='eleven_v3'?'selected':''}>Eleven v3 (Chuẩn đàm thoại)</option>
+            <option value="eleven_v3_conversational" ${c.model_id==='eleven_v3_conversational'?'selected':''}>Eleven v3 Conversational</option>
+            <option value="eleven_multilingual_v2" ${c.model_id==='eleven_multilingual_v2'?'selected':''}>Eleven Multilingual v2</option>
+            <option value="eleven_flash_v2_5" ${c.model_id==='eleven_flash_v2_5'?'selected':''}>Eleven Flash v2.5</option>
+            <option value="eleven_turbo_v2_5" ${c.model_id==='eleven_turbo_v2_5'?'selected':''}>Eleven Turbo v2.5</option>
+          </select>
+        </label>
+        <label>Output <input id="mOut" value="${esc(f(c.requested_output_format))}" placeholder="mp3_44100_128" style="width:150px"/></label>
       </div>
       <div class="row" style="flex-wrap:wrap;gap:8px;margin-top:8px">
         <label>Stability <input id="mStab" type="number" step="0.01" value="${f(vs.stability)}" style="width:80px"/></label>
@@ -907,6 +1165,9 @@ async function resolveVoiceConfig(mode) {
     return;
   }
   state.voiceConfig = r.config;
+  if ($("#qModelSelect") && r.config && r.config.model_id) {
+    setSelectModelValue($("#qModelSelect"), r.config.model_id);
+  }
   // Language compatibility / confirmation line.
   if (li) {
     const c = r.config || {};
@@ -948,8 +1209,43 @@ async function applyManualConfig() {
   }
   state.voiceConfig = r.config;
   state.voiceSyncMode = "manual";
+  if ($("#qModelSelect")) setSelectModelValue($("#qModelSelect"), r.config.model_id);
   renderVoiceSync(); renderSyncPanel(); quickRefresh();
   toast("Đã áp dụng cấu hình tùy chỉnh", "good");
+}
+
+async function applyChosenModel(modelId) {
+  const vid = (state.voiceId || "").trim();
+  if (!vid) return;
+  const { lang } = await effectiveTargetLanguage();
+  const currentSettings = (state.voiceConfig && (state.voiceConfig.effective_voice_settings || state.voiceConfig.voice_settings)) || {};
+  const overrides = {
+    model_id: modelId,
+    output_format: (state.voiceConfig && state.voiceConfig.requested_output_format) || "pcm_16000",
+    voice_settings: currentSettings,
+  };
+  const r = await api("/api/elevenlabs/voice-config/resolve", {
+    method: "POST",
+    body: JSON.stringify({
+      voice_id: vid,
+      mode: "manual",
+      overrides,
+      voice_name: state.voiceMeta && state.voiceMeta.name,
+      target_language: lang
+    })
+  });
+  if (r && r.ok && r.config) {
+    state.voiceConfig = r.config;
+    state.voiceSyncMode = "manual";
+    if ($("#qModelSelect")) setSelectModelValue($("#qModelSelect"), r.config.model_id);
+    renderVoiceSync();
+    renderSyncPanel();
+    quickRefresh();
+    renderScriptPreview();
+    toast(`Đã chọn mô hình ${modelId}`, "good");
+  } else {
+    toast((r && r.error) || "Không thể áp dụng model này", "warn");
+  }
 }
 
 async function loadEdgeVoices() {
@@ -996,17 +1292,11 @@ function renderAvatarPick(a) {
   if (!a) { box.innerHTML = ""; return; }
   const q = a.quality_status;
   const qm = qMeta(q);
-  const note = (a.render_count > 0) ? "Đã kiểm chứng qua render thực tế"
-    : ((a.quality_strengths && a.quality_strengths[0]) ? a.quality_strengths[0] : "Sẵn sàng để render");
   box.innerHTML = `<div class="avatar-pick">
     <img src="/api/avatars/${esc(a.avatar_id)}/thumbnail" onerror="this.style.opacity=.3" />
     <div class="ap-meta">
-      <div class="ap-name">${esc(a.avatar_id)} <span class="tag ${qm.cls}">${esc(qm.short)}</span></div>
-      <div class="ap-sub"><span class="tag good">SẴN SÀNG</span> ${esc(TYPE_VI[a.avatar_type] || a.avatar_type)}</div>
-      <div class="ap-sub" style="margin-top:4px">${esc(note)}</div>
-      <div style="margin-top:6px">
-        <button class="ghost tiny" onclick="showQualityDetail('${esc(a.avatar_id)}')">Chi tiết & Video nguồn</button>
-      </div>
+      <div class="ap-name">${esc(a.avatar_id)} <span class="tag good">SẴN SÀNG</span></div>
+      <div class="ap-sub">${esc(TYPE_VI[a.avatar_type] || a.avatar_type)} · ${esc(qm.short)}</div>
     </div>
   </div>`;
 }
@@ -1117,7 +1407,7 @@ function updateScriptInfo() {
   const info = $("#qScriptInfo");
   if (!txt) {
     if (info) info.innerHTML = `<div class="script-info-bar empty">
-      <span>💡 Hãy nhập hoặc dán nội dung kịch bản. Hệ thống hỗ trợ kịch bản dài không giới hạn.</span>
+      <span>💡 Nhập hoặc dán nội dung kịch bản để bắt đầu.</span>
     </div>`;
     updateSegPreview();
     renderScriptPreview();
@@ -1126,27 +1416,15 @@ function updateScriptInfo() {
   const words = txt.split(/\s+/).filter(Boolean).length;
   const chars = state.scriptText.length;
   const dur = words / 2.8; // ~168 wpm natural Vietnamese speaking pace
-  const sentences = txt.split(/[.!?\n]+/).filter(s => s.trim().length > 0).length;
-
-  let badge = "";
-  if (chars > 10000) {
-    badge = `<span class="tag good">⚡ Kịch bản rất dài (${words.toLocaleString("vi-VN")} từ) — Đã kích hoạt tối ưu</span>`;
-  } else if (chars > 3000) {
-    badge = `<span class="tag good">✓ Kịch bản dài — Tối ưu hóa render tự động</span>`;
-  } else {
-    badge = `<span class="tag muted">✓ Kịch bản chuẩn</span>`;
-  }
 
   if (info) {
     info.innerHTML = `
       <div class="sib-stats">
         <div class="sib-stat"><b>${words.toLocaleString("vi-VN")}</b> <span>từ</span></div>
         <div class="sib-stat"><b>${chars.toLocaleString("vi-VN")}</b> <span>ký tự</span></div>
-        <div class="sib-stat"><b>${sentences.toLocaleString("vi-VN")}</b> <span>câu</span></div>
         <div class="sib-stat accent"><b>~${fmtDur(dur)}</b> <span>thời lượng đọc</span></div>
       </div>
       <div class="sib-right">
-        ${badge}
         <span class="sib-saved" title="Nội dung tự động lưu trên trình duyệt">💾 Đã lưu nháp</span>
       </div>`;
   }
@@ -1155,16 +1433,34 @@ function updateScriptInfo() {
 }
 async function loadApprovedVoices() {
   try {
-    const r = await api("/api/voices/approved");
+    const [r, cr] = await Promise.all([
+      api("/api/voices/approved"),
+      api("/api/voices/custom")
+    ]);
     if (r.ok && r.voices && r.voices.length) {
       state.approvedVoices = r.voices;
-      // restore a previously selected voice only if it is still approved
-      const saved = ls.get("studio_voiceId");
-      if (saved && r.voices.some(v => v.voice_id === saved)) state.voiceId = saved;
-      else if (!state.voiceId && r.voices[0]) state.voiceId = r.voices[0].voice_id;
     }
+    if (cr && cr.ok && Array.isArray(cr.voices)) {
+      state.customVoices = cr.voices;
+    }
+    // restore a previously selected voice only if still valid
+    const saved = ls.get("studio_voiceId");
+    const allKnown = [...(state.approvedVoices || []), ...(state.customVoices || [])];
+    if (saved && allKnown.some(v => v.voice_id === saved)) state.voiceId = saved;
+    else if (!state.voiceId && state.approvedVoices && state.approvedVoices[0]) state.voiceId = state.approvedVoices[0].voice_id;
   } catch (e) { /* keep fallback */ }
 }
+
+async function loadCustomVoices() {
+  try {
+    const cr = await api("/api/voices/custom");
+    if (cr && cr.ok && Array.isArray(cr.voices)) {
+      state.customVoices = cr.voices;
+      renderVoiceCards();
+    }
+  } catch (e) {}
+}
+
 let _sampleAudio = null;
 function playVoiceSample(vid) {
   if (!vid) return;
@@ -1181,7 +1477,12 @@ function playVoiceSample(vid) {
   }
   state.playingSampleVid = vid;
   renderVoiceCards();
-  _sampleAudio = new Audio(`/api/voices/approved/${encodeURIComponent(vid)}/sample`);
+
+  const customV = (state.customVoices || []).find(v => v.voice_id === vid);
+  const accV = (state.accountVoices || []).find(v => v.voice_id === vid);
+  const audioUrl = (customV && customV.preview_url) || (accV && accV.preview_url) || `/api/voices/approved/${encodeURIComponent(vid)}/sample`;
+
+  _sampleAudio = new Audio(audioUrl);
   _sampleAudio.onended = () => {
     state.playingSampleVid = null;
     _sampleAudio = null;
@@ -1198,25 +1499,50 @@ function playVoiceSample(vid) {
 
 function renderVoiceCards() {
   const box = $("#qVoiceCards"); if (!box) return;
-  const voices = state.approvedVoices && state.approvedVoices.length ? state.approvedVoices : [
-    { voice_id: "pGapy9MNHCukzJtjavF0", display_name: "Hạnh - Smooth, Clear and Feminine", description: "Giọng nữ Hà Nội, phù hợp quảng cáo và giải trí.", human_approved: false },
-    { voice_id: "N0Z0aL8qHhzwUHwRBcVo", display_name: "Thanh - Clear, Steady and Informative", description: "Giọng nữ Sài Gòn, phù hợp đọc tin, sách nói và giảng dạy.", human_approved: true },
+  const baseVoices = state.approvedVoices && state.approvedVoices.length ? state.approvedVoices : [
+    { voice_id: "pGapy9MNHCukzJtjavF0", display_name: "Hạnh", description: "Giọng nữ Hà Nội nhẹ nhàng, truyền cảm", human_approved: false },
+    { voice_id: "N0Z0aL8qHhzwUHwRBcVo", display_name: "Thanh", description: "Giọng nữ Sài Gòn rõ ràng, ấm áp", human_approved: true },
   ];
+
+  const customCards = (state.customVoices || []).map(cv => ({
+    voice_id: cv.voice_id,
+    display_name: cv.name || cv.voice_id,
+    description: cv.description || (cv.category ? `Giọng ${cv.category} từ ElevenLabs` : "Giọng tùy chỉnh"),
+    human_approved: false,
+    is_custom: true,
+    preview_url: cv.preview_url
+  }));
+
+  const allVoices = [...baseVoices, ...customCards];
+
   box.className = "voice-cards";
-  box.innerHTML = voices.map(v => {
+  box.innerHTML = allVoices.map(v => {
     const sel = state.voiceId === v.voice_id;
     const isPlaying = state.playingSampleVid === v.voice_id;
-    const badge = v.human_approved
-      ? `<span class="tag good">Đã xác nhận bằng kiểm thử</span>`
-      : `<span class="tag muted">Cấu hình tương thích</span>`;
+    const displayName = (v.display_name || v.voice_id).split(' - ')[0];
+    let badge = v.human_approved
+      ? `<span class="tag good">Khuyên dùng cho Tiếng Việt</span>`
+      : (v.is_custom ? `<span class="tag good">Giọng của bạn</span>` : `<span class="tag muted">Khuyên dùng</span>`);
+
+    let deleteBtn = "";
+    if (v.is_custom) {
+      deleteBtn = `<button type="button" class="ghost tiny danger-text" title="Bỏ giọng này khỏi danh sách thẻ" onclick="event.preventDefault(); event.stopPropagation(); deleteCustomVoiceCard('${esc(v.voice_id)}')">✕ Bỏ</button>`;
+    }
+
+    const hasSample = !v.is_custom || !!v.preview_url;
+
     return `<label class="voice-card${sel ? " selected" : ""}" data-vid="${esc(v.voice_id)}">
-      <input type="radio" name="vcard" value="${esc(v.voice_id)}" ${sel ? "checked" : ""} aria-label="${esc(v.display_name || v.voice_id)}" />
+      <input type="radio" name="vcard" value="${esc(v.voice_id)}" ${sel ? "checked" : ""} aria-label="${esc(displayName)}" />
       <div class="voice-card-body">
         <div class="voice-card-top">
-          <div class="voice-card-name">${esc(v.display_name || v.voice_id)}</div>
-          <button type="button" class="voice-sample-btn${isPlaying ? ' playing' : ''}" onclick="event.preventDefault(); event.stopPropagation(); playVoiceSample('${esc(v.voice_id)}')">
-            ${isPlaying ? '⏸ Dừng' : '▶ Nghe mẫu'}
-          </button>
+          <div class="voice-card-name">${esc(displayName)}</div>
+          <div style="display:flex;gap:4px;align-items:center">
+            ${hasSample ? `
+            <button type="button" class="voice-sample-btn${isPlaying ? ' playing' : ''}" onclick="event.preventDefault(); event.stopPropagation(); playVoiceSample('${esc(v.voice_id)}')">
+              ${isPlaying ? '⏸ Dừng' : '▶ Nghe mẫu'}
+            </button>` : ''}
+            ${deleteBtn}
+          </div>
         </div>
         ${v.description ? `<div class="voice-card-desc">${esc(v.description)}</div>` : ""}
         <div class="voice-card-meta">${badge}</div>
@@ -1226,6 +1552,191 @@ function renderVoiceCards() {
   $$("#qVoiceCards .voice-card").forEach(card => {
     card.onclick = () => selectVoice(card.dataset.vid);
   });
+}
+
+let _accountVoicesLoading = false;
+async function loadAccountVoices(refresh = false) {
+  const sel = $("#qAccountVoicesSelect");
+  if (_accountVoicesLoading) return;
+  _accountVoicesLoading = true;
+  if (sel) sel.innerHTML = `<option value="">— Đang tải danh sách giọng từ ElevenLabs… —</option>`;
+
+  try {
+    const [accRes, custRes] = await Promise.all([
+      api(`/api/elevenlabs/voices${refresh ? "?refresh=1" : ""}`),
+      api("/api/voices/custom")
+    ]);
+
+    if (custRes && custRes.ok) {
+      state.customVoices = custRes.voices || [];
+      renderVoiceCards();
+    }
+
+    if (accRes && accRes.ok && Array.isArray(accRes.voices)) {
+      state.accountVoices = accRes.voices;
+      renderAccountVoicesDropdown();
+    } else if (sel) {
+      sel.innerHTML = `<option value="">— Không tải được danh sách giọng (kiểm tra kết nối/khóa API) —</option>`;
+    }
+  } catch (e) {
+    if (sel) sel.innerHTML = `<option value="">— Lỗi kết nối ElevenLabs —</option>`;
+  } finally {
+    _accountVoicesLoading = false;
+  }
+}
+
+function renderAccountVoicesDropdown() {
+  const sel = $("#qAccountVoicesSelect");
+  if (!sel) return;
+  const voices = state.accountVoices || [];
+  if (!voices.length) {
+    sel.innerHTML = `<option value="">— Chưa tìm thấy giọng nào trong tài khoản ElevenLabs —</option>`;
+    return;
+  }
+
+  const cloned = voices.filter(v => v.category === "cloned" || v.category === "professional");
+  const generated = voices.filter(v => v.category === "generated");
+  const premade = voices.filter(v => v.category === "premade" || (!cloned.includes(v) && !generated.includes(v)));
+
+  function makeGroup(label, list) {
+    if (!list.length) return "";
+    return `<optgroup label="${label}">${list.map(v => {
+      const isSel = (state.voiceId === v.voice_id);
+      const gender = v.labels?.gender ? ` (${v.labels.gender})` : "";
+      return `<option value="${esc(v.voice_id)}" ${isSel ? 'selected' : ''}>${esc(v.name)}${gender}</option>`;
+    }).join("")}</optgroup>`;
+  }
+
+  let html = `<option value="">— Chọn một giọng từ tài khoản ElevenLabs (${voices.length} giọng) —</option>`;
+  html += makeGroup("👤 Giọng Clone của bạn (Cloned Voices)", cloned);
+  html += makeGroup("✨ Giọng tùy biến (Generated)", generated);
+  html += makeGroup("🗣️ Giọng mẫu có sẵn (Premade)", premade);
+  sel.innerHTML = html;
+
+  if (state.voiceId && voices.some(v => v.voice_id === state.voiceId)) {
+    sel.value = state.voiceId;
+  }
+  onAccountVoiceDropdownChange();
+}
+
+function onAccountVoiceDropdownChange() {
+  const sel = $("#qAccountVoicesSelect");
+  const pBtn = $("#qAccountVoicePreviewBtn");
+  const descEl = $("#qAccountVoiceDesc");
+  if (!sel) return;
+  const vid = sel.value;
+  const v = (state.accountVoices || []).find(x => x.voice_id === vid);
+  if (v) {
+    if (descEl) {
+      const catVi = (v.category === 'cloned') ? 'Giọng Clone' : (v.category === 'premade' ? 'Giọng mẫu' : v.category);
+      const lang = v.labels?.language ? ` · Ngôn ngữ: ${v.labels.language}` : "";
+      descEl.textContent = `${catVi} · ID: ${v.voice_id}${lang}${v.description ? ' — ' + v.description : ''}`;
+    }
+    if (pBtn) {
+      pBtn.style.display = v.preview_url ? "inline-block" : "none";
+    }
+  } else {
+    if (descEl) descEl.textContent = "";
+    if (pBtn) pBtn.style.display = "none";
+  }
+}
+
+function playAccountVoicePreview() {
+  const sel = $("#qAccountVoicesSelect");
+  if (!sel || !sel.value) return;
+  const v = (state.accountVoices || []).find(x => x.voice_id === sel.value);
+  if (!v || !v.preview_url) return toast("Giọng này không có file nghe thử", "warn");
+
+  if (_sampleAudio) {
+    _sampleAudio.pause();
+    _sampleAudio = null;
+  }
+  const pBtn = $("#qAccountVoicePreviewBtn");
+  if (pBtn) pBtn.textContent = "⏸ Dừng";
+  _sampleAudio = new Audio(v.preview_url);
+  _sampleAudio.onended = () => {
+    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
+    _sampleAudio = null;
+  };
+  _sampleAudio.onerror = () => {
+    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
+    _sampleAudio = null;
+    toast("Không phát được file mẫu", "bad");
+  };
+  _sampleAudio.play().catch(() => {
+    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
+  });
+}
+
+async function applyAccountVoiceSelection() {
+  const sel = $("#qAccountVoicesSelect");
+  if (!sel || !sel.value) return toast("Vui lòng chọn một giọng từ danh sách", "warn");
+  const vid = sel.value;
+  const voice = (state.accountVoices || []).find(v => v.voice_id === vid);
+  if (!voice) return;
+
+  toast(`Đang kết nối giọng "${voice.name}"…`);
+  try {
+    const res = await api("/api/voices/custom", {
+      method: "POST",
+      body: JSON.stringify({
+        voice_id: voice.voice_id,
+        name: voice.name,
+        category: voice.category,
+        description: voice.description,
+        labels: voice.labels,
+        preview_url: voice.preview_url
+      })
+    });
+    if (res && res.ok) {
+      await loadCustomVoices();
+      await selectVoice(voice.voice_id);
+      toast(`Đã kích hoạt giọng "${voice.name}"!`, "good");
+    } else {
+      toast((res && res.error) || "Không thể kích hoạt giọng này", "bad");
+    }
+  } catch (e) {
+    toast("Lỗi kết nối giọng", "bad");
+  }
+}
+
+async function submitCustomVoiceInput() {
+  const inp = $("#qCustomVoiceInput");
+  const vid = inp ? inp.value.trim() : "";
+  if (!vid) return toast("Vui lòng nhập mã Voice ID từ ElevenLabs", "warn");
+
+  toast("Đang xác thực Voice ID trên ElevenLabs…");
+  try {
+    const res = await api("/api/voices/custom", {
+      method: "POST",
+      body: JSON.stringify({ voice_id: vid })
+    });
+    if (res && res.ok && res.voice) {
+      if (inp) inp.value = "";
+      await loadCustomVoices();
+      await selectVoice(vid);
+      toast(`Đã kết nối giọng "${res.voice.name || vid}" thành công!`, "good");
+    } else {
+      toast((res && res.error) || "Voice ID không tồn tại hoặc không hợp lệ", "bad");
+    }
+  } catch (e) {
+    toast("Lỗi xác thực Voice ID", "bad");
+  }
+}
+
+async function deleteCustomVoiceCard(vid) {
+  if (!vid) return;
+  try {
+    await api(`/api/voices/custom/${encodeURIComponent(vid)}`, { method: "DELETE" });
+    if (state.voiceId === vid) {
+      state.voiceId = "N0Z0aL8qHhzwUHwRBcVo";
+      ls.set("studio_voiceId", state.voiceId);
+      await selectVoice(state.voiceId);
+    }
+    await loadCustomVoices();
+    renderVoiceCards();
+    toast("Đã bỏ giọng tùy chỉnh khỏi danh sách", "good");
+  } catch (e) {}
 }
 
 function isScriptPreviewStale() {
@@ -1308,9 +1819,9 @@ function renderScriptPreview() {
   // Initial empty state
   box.innerHTML = `
     <div class="sp-title"><span>🎙️</span> Bản đọc kịch bản</div>
-    <div class="sp-sub">Nghe trước toàn bộ kịch bản bằng giọng ElevenLabs đã chọn trước khi render video. Âm thanh sẽ được tái sử dụng tự động khi render.</div>
+    <div class="sp-sub">Nghe thử âm thanh kịch bản bằng giọng AI đã chọn trước khi tạo video.</div>
     <div class="sp-actions-row">
-      <button type="button" class="primary-sm" onclick="createScriptPreview(false)">Tạo bản đọc kịch bản</button>
+      <button type="button" class="primary-sm" onclick="createScriptPreview(false)">Nghe thử giọng đọc</button>
     </div>
   `;
 }
@@ -1390,7 +1901,12 @@ async function selectVoice(vid) {
   const info = $("#qVoiceInfo"); if (info) info.innerHTML = `<span class="muted">Đang kiểm tra…</span>`;
   await checkVoice();
   if (state.voiceChecked && state.ttsProvider === "elevenlabs") {
-    await resolveVoiceConfig("auto_current");
+    const chosen = ($("#qModelSelect") && $("#qModelSelect").value) || state.selectedModel;
+    if (chosen) {
+      await applyChosenModel(chosen);
+    } else {
+      await resolveVoiceConfig("auto_current");
+    }
   }
   quickRefresh();
   renderScriptPreview();
@@ -1448,6 +1964,10 @@ async function renderTest10s() {
 }
 async function renderFull() {
   if (!canStartNewWork()) return;
+  if (_lastPreflightResult && !_lastPreflightResult.can_render) {
+    const sum = _lastPreflightResult.summary || {};
+    return toast(sum.headline || "Chưa đủ điều kiện render. Vui lòng kiểm tra lại bảng điều kiện.", "warn");
+  }
   const av = $("#qAvatar").value, vid = activeVoiceId(), txt = state.scriptText;
   if (!av) return toast("Chọn Avatar", "warn");
   if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
@@ -1460,9 +1980,10 @@ async function renderFull() {
     if (!state.voiceConfig) return toast("Chưa xác nhận được cấu hình giọng ElevenLabs. Chọn lại giọng rồi thử lại.", "bad");
   }
   $("#qRenderBtn").disabled = true;
+  const vName = ($("#qVideoName") ? $("#qVideoName").value.trim() : "") || "";
   const body = state.ttsProvider === "edge"
-    ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
+    ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, video_name: vName, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
+    : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, video_name: vName, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
   const r = await api("/api/render", { method: "POST", body: JSON.stringify(body) });
   $("#qRenderBtn").disabled = false;
   if (r.ok) { toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good"); switchView("history"); }
@@ -1490,8 +2011,8 @@ const REQS = [
 async function renderCreate() {
   const el = $("#content");
   el.innerHTML = `
-    <h1 class="view-title">Tạo AI Avatar mới</h1>
-    <p class="view-sub">Tải video của một người — hệ thống tự động kiểm tra và tạo Avatar.</p>
+    <h1 class="view-title">Tạo AI Avatar</h1>
+    <p class="view-sub">Tải video chân dung để hệ thống tự động khởi tạo nhân vật AI mới.</p>
     ${createStepperHTML()}
     <div class="steps wizard">
 
@@ -1504,42 +2025,31 @@ async function renderCreate() {
       </div>
 
       <div class="step" data-step="2">
-        <div class="step-head" onclick="createGoto(2)"><div class="step-num">2</div><div class="step-title">Yêu cầu</div><div class="step-summary"></div></div>
+        <div class="step-head" onclick="createGoto(2)"><div class="step-num">2</div><div class="step-title">Yêu cầu video</div><div class="step-summary"></div></div>
         <div class="step-body">
           <div class="req-grid">
             ${REQS.map(r => `<div class="req-item">${r.ic}<div class="ri-label">${r.label}</div><div class="ri-sub">${r.sub}</div></div>`).join("")}
           </div>
           <details class="tech" style="margin-top:14px">
-            <summary>Xem hướng dẫn chi tiết</summary>
+            <summary>Xem thêm lưu ý chi tiết</summary>
             <div class="guide-detail" style="display:block">
               <div class="guide-cols">
                 <div class="guide-col should">
                   <h3>NÊN</h3>
                   <ul>
-                    <li>Quay từ ngực/vai trở lên</li>
-                    <li>Khuôn mặt đủ lớn trong khung hình</li>
-                    <li>Nhìn gần thẳng vào camera</li>
-                    <li>Miệng ở trạng thái tự nhiên, nghỉ</li>
-                    <li>Không nói trong video nguồn</li>
-                    <li>Nhìn thấy đầy đủ môi và cằm</li>
-                    <li>Camera cố định</li>
-                    <li>Ánh sáng ổn định</li>
-                    <li>Chớp mắt và thở tự nhiên</li>
-                    <li>Chỉ chuyển động đầu/vai rất nhẹ</li>
+                    <li>Quay từ ngực trở lên, nhìn thẳng</li>
+                    <li>Khuôn mặt rõ nét, ánh sáng đều</li>
+                    <li>Miệng khép tự nhiên, không nói chuyện</li>
+                    <li>Camera cố định, cử động nhẹ nhàng</li>
                   </ul>
                 </div>
                 <div class="guide-col avoid">
                   <h3>TRÁNH</h3>
                   <ul>
-                    <li>Đứng quá xa camera</li>
-                    <li>Nói liên tục</li>
-                    <li>Quay nghiêng quá nhiều</li>
-                    <li>Che môi hoặc cằm</li>
-                    <li>Camera rung</li>
-                    <li>Di chuyển cơ thể mạnh</li>
-                    <li>Ánh sáng thay đổi liên tục</li>
-                    <li>Motion blur</li>
-                    <li>File bị nén mạnh</li>
+                    <li>Đứng quá xa hoặc quay nghiêng</li>
+                    <li>Người trong video nói chuyện liên tục</li>
+                    <li>Che khuất miệng hoặc cằm</li>
+                    <li>Camera bị rung lắc mạnh</li>
                   </ul>
                 </div>
               </div>
@@ -1773,12 +2283,11 @@ function renderQuality(d) {
   $("#cQuality").innerHTML = `
     <div class="overall-result tot">
       <span class="or-title">TỐT — Video đạt chuẩn</span>
-      <span class="or-sub">Video hợp lệ và sẵn sàng để khởi tạo AI Avatar chất lượng cao.</span>
+      <span class="or-sub">Video hợp lệ và sẵn sàng để tạo AI Avatar.</span>
     </div>
     <div class="qsection-t good" style="margin-top:14px">Đặc điểm video</div>
-    <div class="qs good">✓ Khuôn mặt rõ nét và nhận diện chính xác</div>
-    <div class="qs good">✓ Góc nhìn và ánh sáng chuẩn MuseTalk v1.5</div>
-    <div class="qs good">✓ Khung hình đầy đủ, sẵn sàng đồng bộ khẩu hình</div>`;
+    <div class="qs good">✓ Khuôn mặt rõ nét, nhận diện chính xác</div>
+    <div class="qs good">✓ Khung hình và ánh sáng ổn định, sẵn sàng tạo Avatar</div>`;
 
   renderMouthConfirm("PASS");
 }
@@ -1804,8 +2313,8 @@ function showPrepare() {
   const d = createState.quality || {};
   $("#cPrepare").innerHTML = `<div class="card">
     <h2>Đặt tên AI Avatar</h2>
-    <input id="cName" placeholder="vd: doTrang_closeup" value="${esc((d.face_h_ratio||0) >= 0.16 ? "closeup" : "avatar")}" />
-    <div class="qhint" style="margin:8px 0">Tên an toàn được tạo tự động. Không ghi đè avatar đã có.</div>
+    <input id="cName" placeholder="vd: my_avatar" value="${esc((d.face_h_ratio||0) >= 0.16 ? "closeup" : "avatar")}" />
+    <div class="qhint" style="margin:8px 0">Đặt tên ngắn gọn để dễ tìm kiếm trong thư viện.</div>
     <div class="actions">
       <button class="primary big" id="cPrepBtn" onclick="prepareAvatar()">TẠO AVATAR</button>
     </div>
@@ -2129,25 +2638,25 @@ function renderQualityModal(aid, q) {
   const pstrengths = (pq.strengths || []).map(s => `<div class="qs good">✓ ${esc(s)}</div>`).join("");
   const pwarns = (pq.warnings || []).map(s => `<div class="qs warn">⚠ ${esc(s)}</div>`).join("");
   const preparedSection = pq.dimensions && pq.dimensions.length ? `
-    <div class="qsection"><div class="qsection-t ${pqm.cls}">B. AVATAR ĐÃ CHUẨN BỊ — ${esc(pqm.short || pq.prepared_status)}</div>
-      <div class="hint">Phân tích từ dữ liệu đã chuẩn bị (full_imgs, coords, mask) — KHÔNG phải chất lượng video nguồn.</div>
+    <div class="qsection"><div class="qsection-t ${pqm.cls}">ĐỘ HOÀN THIỆN AVATAR — ${esc(pqm.short || pq.prepared_status)}</div>
+      <div class="hint">Dữ liệu hình ảnh và khung hình đã được chuẩn bị đầy đủ.</div>
       ${pstrengths ? `<div class="qsection-t good" style="margin-top:8px">Điểm tốt</div>${pstrengths}` : ""}
-      ${pwarns ? `<div class="qsection-t warn" style="margin-top:8px">Điểm cần lưu ý</div>${pwarns}` : ""}
+      ${pwarns ? `<div class="qsection-t warn" style="margin-top:8px">Cần lưu ý</div>${pwarns}` : ""}
     </div>` : "";
   // --- Section C: production confidence ---
   const rh = q.render_history || {};
   const prod = PROD_VI[q.production_confidence] || PROD_VI["CHƯA KIỂM CHỨNG"];
-  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">C. PRODUCTION — ${esc(prod.short)}</div>
-    <div class="hint">${q.production_confidence === "CHƯA KIỂM CHỨNG" ? "Chưa có render thực tế nào được ghi nhận." : `Đã có ${rh.total||0} render hoàn tất (DB: ${rh.db_complete||0}, file: ${rh.external||0}).`}</div></div>`;
+  const prodSection = `<div class="qsection"><div class="qsection-t ${prod.cls}">LỊCH SỬ TẠO VIDEO — ${esc(prod.short)}</div>
+    <div class="hint">${q.production_confidence === "CHƯA KIỂM CHỨNG" ? "Chưa có video render thực tế nào." : `Đã tạo ${rh.total||0} video thành công.`}</div></div>`;
   // Per-dimension rows + technical metrics live behind "Xem đánh giá chi tiết"
   // (spec V1.3.1 §14: summary-first, dimensions in expanded detail area).
   const detailBlock = `
     <details class="tech" style="margin-top:14px">
       <summary>Xem đánh giá chi tiết</summary>
       <div style="margin-top:10px">
-        <div class="adv-sub">A. Video nguồn</div>
-        ${dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn (video nguồn gốc không còn).</div>`}
-        ${pq.dimensions && pq.dimensions.length ? `<div class="adv-sub" style="margin-top:10px">B. Avatar đã chuẩn bị</div><div class="dims">${pdims}</div>` : ""}
+        <div class="adv-sub">Video nguồn</div>
+        ${dims ? `<div class="dims">${dims}</div>` : `<div class="hint">Không đo được chất lượng nguồn.</div>`}
+        ${pq.dimensions && pq.dimensions.length ? `<div class="adv-sub" style="margin-top:10px">Avatar đã chuẩn bị</div><div class="dims">${pdims}</div>` : ""}
         ${(q.face_h_ratio != null || (q.dimensions || []).some(d => d.value != null)) ? `
         <details class="advanced" style="margin-top:10px"><summary>Thông tin kỹ thuật</summary>
           ${q.face_h_ratio != null ? `<div class="kv"><span class="k">face_h_ratio (nguồn)</span><span class="v">${q.face_h_ratio}</span></div>` : ""}
@@ -2157,7 +2666,7 @@ function renderQualityModal(aid, q) {
     </details>`;
   modal(`<h2>${esc(aid)}</h2>
     <div class="summary-blocks">
-      <div class="qsection"><div class="qsection-t ${qm.cls}">A. VIDEO NGUỒN — ${esc(qm.short || q.quality_status)}</div>
+      <div class="qsection"><div class="qsection-t ${qm.cls}">CHẤT LƯỢNG VIDEO NGUỒN — ${esc(qm.short || q.quality_status)}</div>
         <div class="hint">Nguồn đánh giá: ${prov}</div></div>
       ${preparedSection}
       ${prodSection}
@@ -2185,10 +2694,10 @@ function closeModal() { const m = $("#modal"); if (m) m.remove(); }
 // RENDER HISTORY — visual cards, TEST vs VIDEO HOÀN CHỈNH
 async function renderHistory() {
   const el = $("#content");
-  el.innerHTML = `<h1 class="view-title">Lịch sử render</h1>
-    <p class="view-sub">Video bạn tạo sẽ xuất hiện tại đây.</p>
+  el.innerHTML = `<h1 class="view-title">Lịch sử video</h1>
+    <p class="view-sub">Danh sách các video đã tạo.</p>
     <div class="history-controls">
-      <input id="jobSearch" placeholder="Tìm theo tên Avatar, kịch bản, ID render…" value="${esc(state.historySearch || '')}" />
+      <input id="jobSearch" placeholder="Tìm theo tên Avatar, kịch bản, tên video…" value="${esc(state.historySearch || '')}" />
     </div>
     <div class="filter-chips" id="jobFilters">
       <span class="fchip ${state.jobFilter==='all'?'active':''}" data-f="all">Tất cả</span>
@@ -2214,7 +2723,8 @@ async function renderHistory() {
 async function refreshJobs() {
   const r = await api("/api/render/jobs?limit=100");
   const list = $("#jobsList"); if (!list) return;
-  let jobs = r.jobs || [];
+  state.jobs = r.jobs || [];
+  let jobs = state.jobs;
   const f = state.jobFilter;
   if (f === "complete") jobs = jobs.filter(j => j.status === "complete");
   else if (f === "active") jobs = jobs.filter(j => ["queued","preparing_audio","rendering","encoding","verifying"].includes(j.status));
@@ -2244,16 +2754,17 @@ async function refreshJobs() {
   list.innerHTML = jobs.map(j => jobCardHTML(j)).join("");
 }
 function jobCardHTML(j) {
+  const fileMissing = (j.status === "complete" && j.file_exists === false);
   const stageTxt = j.error ? esc(j.error).slice(0, 160) : statusLabel(j.stage || j.status);
-  const thumb = j.status === "complete" && j.output_path
+  const thumb = j.status === "complete" && j.output_path && !fileMissing
     ? `<div class="jthumb-wrap" onclick="playJob('${j.job_id}')" title="Nhấn để xem video"><img class="jthumb" src="/api/avatars/${esc(j.avatar_id)}/thumbnail" onerror="this.style.opacity=.3" /><div class="jthumb-play-overlay">▶</div></div>`
-    : `<div class="jthumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:20px">${j.status === "failed" ? "✗" : j.status === "timed_out" ? "⏱" : "—"}</div>`;
+    : `<div class="jthumb" style="display:flex;align-items:center;justify-content:center;color:var(--muted2);font-size:20px">${fileMissing ? "🗑️" : (j.status === "failed" ? "✗" : j.status === "timed_out" ? "⏱" : "—")}</div>`;
   let actions = "";
   // "Mở thư mục" opens a folder on the HOST machine — only meaningful on
   // localhost. For a remote collaborator (Cloudflare tunnel from another PC)
   // it would do nothing useful, so hide it there (spec V1.3.1 §16).
   if (j.status === "complete") {
-    actions = `${isLocalhost() ? `<button class="ghost tiny" onclick="openFolder('${j.job_id}')">Mở thư mục</button>` : ""}
+    actions = `${(isLocalhost() && !fileMissing) ? `<button class="ghost tiny" onclick="openFolder('${j.job_id}')">Mở thư mục</button>` : ""}
       <button class="ghost tiny danger-text" onclick="deleteJob('${j.job_id}')" title="Chuyển video vào Thùng rác">Xóa</button>`;
   } else if (["failed","cancelled","timed_out"].includes(j.status)) {
     actions = `<button class="ghost tiny" onclick="retryJob('${j.job_id}')">Thử lại</button>
@@ -2295,7 +2806,7 @@ function jobCardHTML(j) {
       const tc = j.tts_config ? JSON.parse(j.tts_config) : null;
       if (tc) {
         const ms = tc.match_strength;
-        if (ms === "history_item" || tc.sync_mode === "history_match") syncBadge = `<span class="tag good">Match History</span>`;
+        if (ms === "history_item" || tc.sync_mode === "history_match") syncBadge = `<span class="tag good">Đồng bộ</span>`;
         else if (ms === "history_matched") syncBadge = `<span class="tag good">Đồng bộ</span>`;
         else if (ms === "settings_only") syncBadge = `<span class="tag muted">Cài đặt giọng</span>`;
         else if (ms === "manual") syncBadge = `<span class="tag muted">Tùy chỉnh</span>`;
@@ -2304,16 +2815,14 @@ function jobCardHTML(j) {
   }
   // Distinguish TEST vs VIDEO HOÀN CHỈNH visually.
   const testBadge = isMouthTest
-    ? `<span class="tag warn">TEST KHẨU HÌNH</span>`
-    : (isTest ? `<span class="tag warn">TEST</span>` : `<span class="tag good">VIDEO HOÀN CHỈNH</span>`);
-  const kindLabel = isMouthTest ? "Test khẩu hình" : (j.kind === "test10s" ? "Kiểm tra 10s" : (j.script_name || "Video đầy đủ"));
+    ? `<span class="tag warn">THỬ KHẨU HÌNH</span>`
+    : (isTest ? `<span class="tag warn">XEM THỬ 10S</span>` : `<span class="tag good">CHÍNH THỨC</span>`);
+  const kindLabel = isMouthTest ? "Thử khẩu hình" : (j.kind === "test10s" ? "Xem thử 10s" : (j.script_name || "Video hoàn chỉnh"));
   // V1.6.1 — user-set video name. Falls back to the auto label when unset.
   const named = !!(j.display_name && String(j.display_name).trim());
   const titleText = named ? j.display_name : kindLabel;
-  const canRename = j.status === "complete";
-  const renameBtn = canRename
-    ? `<button class="rename-edit-btn" title="Đặt tên video" onclick="event.stopPropagation();startInlineRename('jtitletext_${j.job_id}','${j.job_id}',${JSON.stringify(j.display_name||"")})">✏️ Đặt tên</button>`
-    : "";
+  const renameBtn = `<button type="button" class="rename-edit-btn" title="Đổi tên video" onclick="event.preventDefault();event.stopPropagation();promptRenameVideo('${esc(j.job_id)}')">✏️ Đổi tên</button>`;
+
   return `<div class="job ${isTest ? 'is-test' : 'is-prod'}" data-job="${j.job_id}">
     ${thumb}
     <div class="jbody">
@@ -2323,15 +2832,19 @@ function jobCardHTML(j) {
         ${renameBtn}
       </div>
       <div class="jsub">${named ? `${esc(kindLabel)} · ` : ""}${esc(j.avatar_id)} · Giọng: ${voiceDisplay}${voiceName && provider === "ELEVENLABS" ? " · " + esc(voiceName) : ""} · ${fmtDur(j.duration_sec)}</div>
-      <div class="jbadges">${testBadge} ${providerTag} ${syncBadge}</div>
+      <div class="jbadges">${testBadge} ${providerTag} ${syncBadge}${fileMissing ? ` <span class="tag warn" title="Tệp video đã được dọn dẹp hoặc không còn trên đĩa">File đã dọn dẹp</span>` : ""}</div>
       <div class="fstatus ${j.status}">${statusLabel(j.status)}${j.error ? " · " + stageTxt : ""}</div>
       ${["rendering","encoding","verifying","preparing_audio"].includes(j.status) && j.progress != null ? `<div class="progress" style="margin-top:6px"><div style="width:${j.progress}%"></div></div>` : ""}
     </div>
     <div class="row" style="flex-wrap:nowrap">
       ${logBtn}
       ${actions}
-      ${j.status === "complete" ? `<button class="ghost tiny" onclick="downloadJob('${j.job_id}','${esc(kindLabel)}')">Tải video</button>
-      <button class="primary tiny" onclick="playJob('${j.job_id}')">▶ Xem video</button>` : ""}
+      ${j.status === "complete" ? (
+        fileMissing
+          ? `<span class="muted" style="font-size:11px;align-self:center;margin-left:4px">Đã dọn dẹp</span>`
+          : `<button class="ghost tiny" onclick="downloadJob('${j.job_id}','${esc(kindLabel)}')">Tải video</button>
+             <button class="primary tiny" onclick="playJob('${j.job_id}')">▶ Xem video</button>`
+      ) : ""}
     </div>
   </div>`;
 }
@@ -2391,7 +2904,7 @@ function copyLogContent() {
 // Enhanced Video Player Modal with playback speed controls & shortcuts
 async function playJob(id) {
   const j = await api(`/api/render/jobs/${id}`);
-  if (!j.output_path) return toast("Không có file video", "warn");
+  if (!j.output_path || j.file_exists === false) return toast("Tệp video không còn tồn tại trên ổ đĩa (đã được dọn dẹp).", "warn");
   let v = $("#playerModal"); if (v) v.remove();
   v = document.createElement("div"); v.id = "playerModal";
   v.className = "modal-bg";
@@ -2405,7 +2918,12 @@ async function playJob(id) {
       <div class="modal-close" onclick="closePlayerModal()">✕</div>
     </div>
     <div class="player-video-wrap">
-      <video id="mainVideoPlayer" src="/api/render/jobs/${id}/preview" controls autoplay playsinline></video>
+      <video id="mainVideoPlayer" src="/api/render/jobs/${id}/preview" controls autoplay playsinline onerror="this.style.display='none';const e=document.getElementById('videoPlayerErrBox');if(e)e.style.display='block';"></video>
+      <div id="videoPlayerErrBox" style="display:none;padding:48px 16px;text-align:center;color:var(--bad);background:#111;border-radius:8px">
+        <div style="font-size:24px;margin-bottom:8px">⚠️</div>
+        <b>Không thể phát video</b>
+        <div class="muted" style="margin-top:6px;font-size:12px">Tệp video không tìm thấy trên ổ đĩa hoặc đã bị xóa.</div>
+      </div>
     </div>
     <div class="player-controls-bar">
       <div class="row">
@@ -2417,9 +2935,9 @@ async function playJob(id) {
         <button class="rate-btn" data-rate="2" onclick="setPlaybackRate(2)">2x</button>
       </div>
       <div class="row">
-        <button class="ghost tiny" onclick="renameFromPlayer('${j.job_id}',${titleJson})" title="Đặt tên cho video">✏️ Đặt tên</button>
-        <button class="ghost tiny" onclick="downloadJob('${j.job_id}',${JSON.stringify(title)})">Tải video</button>
-        <button class="primary tiny" onclick="closePlayerModal()">Đóng (Esc)</button>
+        <button type="button" class="ghost tiny" onclick="event.preventDefault();event.stopPropagation();promptRenameVideo('${esc(j.job_id)}')" title="Đổi tên cho video">✏️ Đổi tên</button>
+        <button type="button" class="ghost tiny" onclick="downloadJob('${j.job_id}',${JSON.stringify(title)})">Tải video</button>
+        <button type="button" class="primary tiny" onclick="closePlayerModal()">Đóng (Esc)</button>
       </div>
     </div>
     <div class="hint" style="margin-top:8px;font-size:11px">Phím tắt: Space = Play/Pause · ← / → = Tua 5s · Esc = Đóng</div>
@@ -2444,6 +2962,7 @@ async function downloadJob(id, name) {
   let fname = name || "video";
   try {
     const j = await api(`/api/render/jobs/${id}`);
+    if (j.file_exists === false) return toast("Tệp video không còn tồn tại trên ổ đĩa để tải về.", "warn");
     fname = (j.display_name && j.display_name.trim()) ? j.display_name
            : (j.script_name || j.kind || name || "video");
   } catch (e) { /* keep fallback */ }
@@ -2455,57 +2974,88 @@ async function downloadJob(id, name) {
 }
 async function openFolder(id) { await api(`/api/render/jobs/${id}/open-folder`, { method: "POST" }); }
 
-// V1.6.1 — inline video rename. Reusable for the job card and the player modal.
-function _attachInlineRename(input, jobId, currentVal, onDone) {
-  input.focus(); input.select();
-  let settled = false;
-  const finish = async (save) => {
-    if (settled) return; settled = true;
-    const v = input.value.trim();
-    let newName = currentVal || null;
-    if (save && v !== (currentVal || "")) {
-      try {
-        const r = await api(`/api/render/jobs/${jobId}/rename`,
-          { method: "POST", body: JSON.stringify({ name: v }) });
-        if (r.ok) { toast(v ? "Đã đặt tên video" : "Đã đặt lại tên mặc định", "good"); newName = r.display_name || (v || null); }
-        else { toast(r.error || "Không đặt tên được", "bad"); }
-      } catch (e) { toast("Không đặt tên được", "bad"); }
+// V1.6.1 — Video Rename via clean Modal Dialog with explicit Confirm / Cancel.
+async function promptRenameVideo(jobId) {
+  let curName = "";
+  try {
+    const j = await api(`/api/render/jobs/${jobId}`);
+    curName = (j && j.display_name && j.display_name.trim()) ? j.display_name : (j ? (j.script_name || j.kind || "") : "");
+  } catch (e) {
+    const j = (state.jobs || []).find(x => x.job_id === jobId);
+    curName = (j && j.display_name && j.display_name.trim()) ? j.display_name : "";
+  }
+  modal(`<h2>Đổi tên video</h2>
+    <div class="muted">Đặt tên gợi nhớ cho video của bạn (dễ tìm kiếm và tự động dùng làm tên file tải về).</div>
+    <div style="margin-top:14px">
+      <label for="newJobNameInput" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">TÊN VIDEO MỚI</label>
+      <input id="newJobNameInput" value="${esc(curName)}" placeholder="Nhập tên cho video…" maxlength="120" style="width:100%;box-sizing:border-box" autofocus />
+    </div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="primary" id="saveJobNameBtn" onclick="submitRenameVideo('${esc(jobId)}')">Xác nhận đổi tên</button>
+    </div>`);
+  setTimeout(() => {
+    const inp = $("#newJobNameInput");
+    if (inp) {
+      inp.focus();
+      inp.select();
+      inp.onkeydown = (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          $("#saveJobNameBtn").click();
+        }
+      };
     }
-    onDone(newName);
-  };
-  input.onkeydown = (e) => {
-    if (e.key === "Enter") { e.preventDefault(); finish(true); }
-    else if (e.key === "Escape") { e.preventDefault(); finish(false); }
-  };
-  input.onblur = () => finish(true);
+  }, 50);
 }
-function startInlineRename(spanId, jobId, currentVal) {
-  const span = document.getElementById(spanId);
-  if (!span) return;
-  const input = document.createElement("input");
-  input.type = "text"; input.className = "rename-input"; input.maxLength = 120;
-  input.value = currentVal || ""; input.placeholder = "Nhập tên cho video…";
-  span.replaceWith(input);
-  _attachInlineRename(input, jobId, currentVal || "", () => refreshJobs());
-}
-async function renameFromPlayer(jobId, currentVal) {
-  const titleEl = document.getElementById("playerTitleText");
-  if (!titleEl) return;
-  const input = document.createElement("input");
-  input.type = "text"; input.className = "rename-input"; input.maxLength = 120;
-  input.value = currentVal || ""; input.placeholder = "Nhập tên cho video…";
-  input.style.maxWidth = "340px";
-  titleEl.replaceWith(input);
-  _attachInlineRename(input, jobId, currentVal || "", async () => {
-    // Re-fetch and rebuild the player title with the new name.
-    try {
-      const j = await api(`/api/render/jobs/${jobId}`);
-      const b = document.createElement("b"); b.id = "playerTitleText";
-      b.textContent = (j.display_name && j.display_name.trim()) ? j.display_name
-                     : (j.script_name || j.kind || "Video");
-      input.replaceWith(b);
-    } catch (e) { refreshJobs(); }
-  });
+
+async function submitRenameVideo(jobId) {
+  const inp = $("#newJobNameInput");
+  const val = inp ? inp.value.trim() : "";
+  const btn = $("#saveJobNameBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api(`/api/render/jobs/${jobId}/rename`, { method: "POST", body: JSON.stringify({ name: val }) });
+    if (r.ok) {
+      closeModal();
+      toast(val ? `Đã đổi tên video thành "${val}"` : "Đã đặt lại tên mặc định", "good");
+      
+      // Update in-place to stay exactly on current page & scroll position
+      const jInState = (state.jobs || []).find(x => x.job_id === jobId);
+      if (jInState) jInState.display_name = val;
+      
+      const titleEl = document.querySelector(`#jtitletext_${jobId}`);
+      if (titleEl) {
+        const fallback = jInState ? (jInState.script_name || jInState.kind || "Video") : "Video";
+        titleEl.textContent = val || fallback;
+      }
+      
+      const titleWrap = document.querySelector(`#jtitle_${jobId}`);
+      if (titleWrap) {
+        let tag = titleWrap.querySelector(".named-tag");
+        if (val) {
+          if (!tag) {
+            tag = document.createElement("span");
+            tag.className = "named-tag";
+            tag.title = "Đã đặt tên";
+            tag.textContent = "Đã đặt tên";
+            if (titleEl) titleEl.after(tag);
+          }
+        } else if (tag) {
+          tag.remove();
+        }
+      }
+
+      const pTitle = document.querySelector("#playerTitleText");
+      if (pTitle) pTitle.textContent = val || "Video";
+    } else {
+      if (btn) btn.disabled = false;
+      toast(r.error || "Không đổi tên được", "bad");
+    }
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast("Không đổi tên được", "bad");
+  }
 }
 
 async function retryJob(id) {
@@ -2686,19 +3236,19 @@ function renderStatus() {
   const partial = !allOk && s.truth_valid;
   const heroCls = allOk ? "" : partial ? "partial" : "bad";
   const heroTitle = allOk ? "HỆ THỐNG SẴN SÀNG" : partial ? "HOẠT ĐỘNG MỘT PHẦN" : "CHƯA SẴN SÀNG";
-  const heroSub = allOk ? "Tất cả thành phần sẵn sàng để tạo video."
+  const heroSub = allOk ? "Hệ thống đã sẵn sàng để tạo video."
     : partial ? "Một số thành phần chưa sẵn sàng — kiểm tra chi tiết bên dưới."
     : "Hệ thống chưa sẵn sàng — kiểm tra chi tiết bên dưới.";
   const items = [
-    { name: "AI Avatar", ok: s.renderer_ready, sub: s.renderer_ready ? "Sẵn sàng" : "Chưa sẵn sàng" },
-    { name: "GPU", ok: (s.gpus && s.gpus.length), sub: (s.gpus || []).map(g => `GPU${g.id} ${g.state === "BUSY" ? "đang chạy" : "sẵn sàng"}`).join(" · ") || "—" },
-    { name: "ElevenLabs", ok: s.elevenlabs_connected, sub: s.elevenlabs_connected ? "Đã kết nối" : "Chưa kết nối" },
-    { name: "Edge TTS", ok: s.edge_tts_available, sub: s.edge_tts_available ? "Khả dụng" : "Không khả dụng" },
+    { name: "Mô hình Avatar", ok: s.renderer_ready, sub: s.renderer_ready ? "Sẵn sàng" : "Chưa sẵn sàng" },
+    { name: "Bộ xử lý GPU", ok: (s.gpus && s.gpus.length), sub: (s.gpus || []).map(g => (g.state === "BUSY" ? "Đang xử lý" : "Sẵn sàng")).join(" · ") || "—" },
+    { name: "Giọng ElevenLabs", ok: s.elevenlabs_connected, sub: s.elevenlabs_connected ? "Đã kết nối" : "Chưa kết nối" },
+    { name: "Giọng dùng thử (Edge)", ok: s.edge_tts_available, sub: s.edge_tts_available ? "Khả dụng" : "Không khả dụng" },
   ];
   const t = s.truth || {};
   el.innerHTML = `
     <h1 class="view-title">Trạng thái hệ thống</h1>
-    <p class="view-sub">Kiểm tra nhanh trước khi tạo video.</p>
+    <p class="view-sub">Kiểm tra kết nối và tài nguyên tạo video.</p>
     <div class="status-hero ${heroCls}">
       <div class="sh-icon">${ICO.check}</div>
       <div><div class="sh-title">${heroTitle}</div><div class="sh-sub">${heroSub}</div></div>
@@ -2732,25 +3282,141 @@ function renderStatus() {
 async function renderSettings() {
   const s = state.status || {};
   const el = $("#content");
-  el.innerHTML = `<h1 class="view-title">Cài đặt</h1>
-    <p class="view-sub">Kết nối giọng và cấu hình tài khoản.</p>
+
+  let settingsData = {};
+  let profilesData = [];
+  try {
+    const [resSet, resProf] = await Promise.all([
+      api("/api/settings/elevenlabs"),
+      api("/api/elevenlabs/profiles")
+    ]);
+    if (resSet && resSet.ok) settingsData = resSet;
+    if (resProf && resProf.ok) profilesData = resProf.profiles || [];
+  } catch (e) {}
+
+  const activeModel = settingsData.model_id || el_model_id();
+  const currentVoiceId = settingsData.voice_id || s.elevenlabs_voice_id || "N0Z0aL8qHhzwUHwRBcVo";
+  const currentMaxChars = settingsData.max_text_chars || s.tts_max_text_chars || 4800;
+  const isConnected = settingsData.connected ?? s.elevenlabs_connected;
+  const keyMasked = settingsData.key_masked || s.elevenlabs_key_masked || "—";
+
+  const MODEL_OPTIONS = [
+    { id: "eleven_v4", name: "⭐ Eleven v4 (Mới nhất · Biểu cảm chân thực nhất)" },
+    { id: "eleven_v4_turbo", name: "⚡ Eleven v4 Turbo (Độ trễ siêu thấp ~100ms)" },
+    { id: "eleven_v3", name: "Eleven v3 (Chuẩn đàm thoại tự nhiên)" },
+    { id: "eleven_v3_conversational", name: "Eleven v3 Conversational (Giao tiếp hội thoại)" },
+    { id: "eleven_multilingual_v2", name: "Eleven Multilingual v2 (Đa ngôn ngữ ổn định)" },
+    { id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5 (Tối ưu tốc độ)" },
+    { id: "eleven_flash_v2_5", name: "Eleven Flash v2.5 (Siêu tốc ~75ms)" },
+  ];
+
+  let profilesHtml = "";
+  if (profilesData && profilesData.length > 0) {
+    profilesHtml = `
+      <div class="card">
+        <h2>Hồ sơ giọng nói đã lưu (Voice Profiles)</h2>
+        <div class="hint" style="margin-bottom:12px">Danh sách các giọng đọc đã được liên kết model riêng. Bạn có thể chuyển model hoặc xóa để sử dụng model mặc định.</div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border);text-align:left">
+                <th style="padding:8px">Voice ID</th>
+                <th style="padding:8px">Ngôn ngữ</th>
+                <th style="padding:8px">Model hiện tại</th>
+                <th style="padding:8px">Nguồn</th>
+                <th style="padding:8px;text-align:right">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${profilesData.map(p => `
+                <tr style="border-bottom:1px solid var(--border2,#333)">
+                  <td style="padding:8px;font-family:var(--mono)">${esc(p.voice_id)}</td>
+                  <td style="padding:8px"><span class="tag">${esc(p.language_code || "vi")}</span></td>
+                  <td style="padding:8px"><b style="color:var(--accent,#4f8cff)">${esc(p.preferred_model_id)}</b></td>
+                  <td style="padding:8px" class="muted">${esc(p.selection_source || "—")}</td>
+                  <td style="padding:8px;text-align:right">
+                    ${p.preferred_model_id !== 'eleven_v4' ? `<button class="ghost tiny" onclick="switchProfileToV4('${esc(p.voice_id)}', '${esc(p.language_code)}')">Dùng v4</button>` : ''}
+                    <button class="danger tiny" onclick="deleteVoiceProfileRow('${esc(p.voice_id)}', '${esc(p.language_code)}')">Xóa</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  el.innerHTML = `<h1 class="view-title">Cài đặt & Cấu hình</h1>
+    <p class="view-sub">Quản lý kết nối giọng AI (ElevenLabs), mô hình thế hệ mới và cấu hình hệ thống.</p>
+
     <div class="card">
-      <h2>ElevenLabs</h2>
-      <div class="kv"><span class="k">Trạng thái</span><span class="v">${s.elevenlabs_connected ? '<span style="color:var(--good)">● Đã kết nối</span>' : '<span style="color:var(--bad)">● Chưa kết nối</span>'}</span></div>
-      <div class="kv"><span class="k">API Key</span><span class="v">${esc(s.elevenlabs_key_masked)}</span></div>
-      <div class="kv"><span class="k">Model TTS</span><span class="v">${esc(el_model_id())}</span></div>
-      <div id="quotaRow" class="kv"><span class="k">Hạn mức tài khoản</span><span class="v muted">đang kiểm tra…</span></div>
-      <div style="margin-top:14px">
-        <label>Cập nhật API Key (lưu trong .env, không ghi log)</label>
-        <div class="row"><input id="sKey" type="password" placeholder="API key ElevenLabs mới" style="flex:1" />
-        <button class="primary" onclick="saveKey()">Cập nhật Key</button></div>
+      <h2>Cấu hình giọng đọc ElevenLabs (AI Voice)</h2>
+      <div class="kv"><span class="k">Trạng thái kết nối</span><span class="v">${isConnected ? '<span style="color:var(--good)">● Đã kết nối API</span>' : '<span style="color:var(--bad)">● Chưa kết nối API</span>'}</span></div>
+      <div class="kv"><span class="k">Khóa API hiện tại</span><span class="v" id="sCurrentKey">${esc(keyMasked)}</span></div>
+      <div class="kv"><span class="k">Model hiện đang áp dụng</span><span class="v"><b style="color:var(--accent,#4f8cff)">${esc(activeModel)}</b></span></div>
+      <div id="quotaRow" class="kv"><span class="k">Hạn mức tài khoản (Quota)</span><span class="v muted">đang kiểm tra…</span></div>
+
+      <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
+        <h3 style="font-size:14px;margin-bottom:12px;font-weight:600">Tùy chỉnh thông số ElevenLabs</h3>
+        
+        <div style="margin-bottom:14px">
+          <label style="font-weight:600;display:block;margin-bottom:6px">1. Model AI Voice mặc định:</label>
+          <select id="sModelSelect" style="width:100%;max-width:550px">
+            ${MODEL_OPTIONS.map(m => `<option value="${m.id}" ${activeModel === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
+          </select>
+          <div class="hint">Khuyến nghị: <b>Eleven v4</b> (chất lượng lồng tiếng cao nhất và cảm xúc tự nhiên).</div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" id="sSyncProfiles" checked />
+            <span>Đồng bộ model đã chọn cho các hồ sơ giọng đã lưu</span>
+          </label>
+        </div>
+
+        <div style="margin-bottom:14px">
+          <label style="font-weight:600;display:block;margin-bottom:6px">2. Voice ID mặc định:</label>
+          <input id="sVoiceId" type="text" value="${esc(currentVoiceId)}" placeholder="Voice ID từ ElevenLabs" style="max-width:550px" />
+          <div class="hint">Voice ID mặc định dùng khi tạo video mới hoặc kiểm tra giọng.</div>
+        </div>
+
+        <div style="margin-bottom:14px">
+          <label style="font-weight:600;display:block;margin-bottom:6px">3. Giới hạn ký tự mỗi lượt đọc:</label>
+          <input id="sMaxChars" type="number" step="100" min="500" max="40000" value="${currentMaxChars}" placeholder="4800" style="max-width:200px" />
+          <div class="hint">Số ký tự tối đa cho mỗi lần đọc TTS (mặc định: 4800 ký tự).</div>
+        </div>
+
+        <div style="margin-bottom:14px">
+          <label style="font-weight:600;display:block;margin-bottom:6px">4. Cập nhật API Key mới (để trống nếu không đổi):</label>
+          <div class="row" style="max-width:550px">
+            <input id="sKey" type="password" placeholder="Nhập API key ElevenLabs mới" style="flex:1" />
+            <button type="button" class="ghost tiny" onclick="togglePasswordVisibility('sKey')">Hiện/Ẩn</button>
+          </div>
+          <div class="hint">Khóa API được lưu an toàn trong tệp .env nội bộ trên máy.</div>
+        </div>
+
+        <div class="actions" style="margin-top:18px">
+          <button class="primary" onclick="saveElevenLabsSettings()">💾 Lưu Cấu Hình</button>
+          <button class="ghost" onclick="checkQuotaManual()">🔄 Kiểm Tra Quota</button>
+        </div>
       </div>
     </div>
+
+    ${profilesHtml}
+
     <div class="card">
       <h2>Giọng test miễn phí (Edge TTS)</h2>
       <div class="kv"><span class="k">Trạng thái</span><span class="v">${s.edge_tts_available ? '<span style="color:var(--good)">● Khả dụng</span>' : '<span style="color:var(--bad)">● Không khả dụng</span>'}</span></div>
-      <div class="hint" style="margin-top:8px">Giọng test miễn phí dùng dịch vụ TTS online. Không gửi API key, video avatar hay ảnh đã chuẩn bị. Chỉ dùng để kiểm tra chuyển động miệng — không phải giọng production.</div>
+      <div class="hint" style="margin-top:8px">Giọng đọc miễn phí dùng để kiểm tra nhanh chuyển động môi mà không tốn quota.</div>
     </div>
+
+    <div class="card">
+      <h2>Thư mục lưu trữ & Render video</h2>
+      <div class="kv"><span class="k">Đường dẫn thư mục</span><span class="v mono">${esc(s.renders_dir || "—")}</span></div>
+      <div class="kv"><span class="k">Quyền ghi đĩa</span><span class="v">${s.renders_dir_writable ? '<span style="color:var(--good)">● Sẵn sàng</span>' : '<span style="color:var(--bad)">● Lỗi ghi đĩa</span>'}</span></div>
+      <div class="actions" style="margin-top:12px">
+        <button class="secondary tiny" onclick="openRendersFolder()">📂 Mở thư mục trên máy tính</button>
+      </div>
+    </div>
+
     ${serverHealthCard(s)}
     <details class="tech">
       <summary>Thông tin kỹ thuật hệ thống</summary>
@@ -2765,21 +3431,109 @@ async function renderSettings() {
         <div class="kv"><span class="k">Thư mục render</span><span class="v">${esc(s.renders_dir)}</span></div>
       </div>
     </details>`;
-  fetch("/api/elevenlabs/quota").then(r => r.json()).then(q => {
-    const row = $("#quotaRow"); if (!row) return;
-    if (!q.ok) { row.querySelector(".v").textContent = q.error || "không có"; return; }
+
+  const smEl = $("#sModelSelect");
+  if (smEl) {
+    initModelDropdown(smEl, activeModel);
+  }
+
+  checkQuotaManual(true);
+}
+
+function el_model_id() { return state.status?.elevenlabs_model_id || "—"; }
+
+function togglePasswordVisibility(id) {
+  const inp = $("#" + id);
+  if (!inp) return;
+  inp.type = inp.type === "password" ? "text" : "password";
+}
+
+async function saveElevenLabsSettings() {
+  const model = ($("#sModelSelect") && $("#sModelSelect").value.trim()) || "";
+  const voice = ($("#sVoiceId") && $("#sVoiceId").value.trim()) || "";
+  const maxChars = parseInt($("#sMaxChars") && $("#sMaxChars").value) || null;
+  const key = ($("#sKey") && $("#sKey").value.trim()) || "";
+  const syncProfiles = $("#sSyncProfiles") ? $("#sSyncProfiles").checked : false;
+
+  const payload = { sync_profiles: syncProfiles };
+  if (model) payload.model_id = model;
+  if (voice) payload.voice_id = voice;
+  if (maxChars) payload.max_text_chars = maxChars;
+  if (key) payload.api_key = key;
+
+  toast("Đang lưu cấu hình…");
+  const r = await api("/api/settings/elevenlabs", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+
+  if (r.ok) {
+    toast("Đã lưu cấu hình ElevenLabs thành công! (Lưu vào .env và kích hoạt ngay)", "good");
+    if ($("#sKey")) $("#sKey").value = "";
+    await loadStatus();
+    renderSettings();
+  } else {
+    toast(r.error || "Lỗi lưu cấu hình", "bad");
+  }
+}
+
+const saveKey = saveElevenLabsSettings;
+
+async function checkQuotaManual(silent) {
+  const row = $("#quotaRow");
+  if (!silent) toast("Đang kiểm tra hạn mức ElevenLabs…");
+  try {
+    const q = await api("/api/elevenlabs/quota");
+    if (!row) return;
+    if (!q.ok) {
+      row.querySelector(".v").textContent = q.error || "không có thông tin";
+      if (!silent) toast(q.error || "Không kiểm tra được hạn mức", "warn");
+      return;
+    }
     const rem = (q.remaining == null) ? "—" : q.remaining.toLocaleString("vi-VN");
     const reset = q.reset_date_utc ? ` · đặt lại ${q.reset_date_utc}` : "";
-    row.querySelector(".v").innerHTML = `gói ${esc(q.tier||"—")} · ${q.character_count.toLocaleString("vi-VN")}/${q.character_limit.toLocaleString("vi-VN")} ký tự · <b style="color:${q.remaining>0?'var(--good)':'var(--bad)'}">${rem} còn lại</b>${reset}`;
-  }).catch(() => { const row = $("#quotaRow"); if (row) row.querySelector(".v").textContent = "không có"; });
+    row.querySelector(".v").innerHTML = `gói ${esc(q.tier || "—")} · ${q.character_count.toLocaleString("vi-VN")}/${q.character_limit.toLocaleString("vi-VN")} ký tự · <b style="color:${q.remaining > 0 ? 'var(--good)' : 'var(--bad)'}">${rem} còn lại</b>${reset}`;
+    if (!silent) toast(`Hạn mức còn lại: ${rem} ký tự`, "good");
+  } catch (e) {
+    if (row) row.querySelector(".v").textContent = "không có";
+  }
 }
-function el_model_id() { return state.status?.elevenlabs_model_id || "—"; }
-async function saveKey() {
-  const key = $("#sKey").value.trim();
-  if (!key) return toast("Nhập API key", "warn");
-  const r = await api("/api/settings/elevenlabs", { method: "POST", body: JSON.stringify({ api_key: key }) });
-  if (r.ok) { toast("Đã lưu key — ElevenLabs đã kết nối", "good"); $("#sKey").value = ""; await loadStatus(); renderSettings(); }
-  else toast(r.error || "Lỗi lưu", "bad");
+
+async function switchProfileToV4(voiceId, lang) {
+  toast("Đang chuyển hồ sơ sang Eleven v4…");
+  const r = await api("/api/elevenlabs/profiles", {
+    method: "POST",
+    body: JSON.stringify({ voice_id: voiceId, language_code: lang, preferred_model_id: "eleven_v4" })
+  });
+  if (r.ok) {
+    toast(`Đã chuyển giọng ${voiceId} sang Eleven v4`, "good");
+    renderSettings();
+  } else {
+    toast(r.error || "Lỗi cập nhật hồ sơ", "bad");
+  }
+}
+
+async function deleteVoiceProfileRow(voiceId, lang) {
+  if (!confirm(`Xóa cấu hình riêng của giọng ${voiceId}? Giọng sẽ dùng model mặc định.`)) return;
+  const r = await api("/api/elevenlabs/profiles", {
+    method: "DELETE",
+    body: JSON.stringify({ voice_id: voiceId, language_code: lang })
+  });
+  if (r.ok) {
+    toast("Đã xóa hồ sơ riêng", "good");
+    renderSettings();
+  } else {
+    toast(r.error || "Lỗi xóa", "bad");
+  }
+}
+
+async function openRendersFolder() {
+  const r = await api("/api/system/open-renders-folder", { method: "POST" });
+  if (r.ok) {
+    toast("Đã mở thư mục renders", "good");
+  } else {
+    toast("Không thể mở thư mục: " + (r.error || ""), "warn");
+  }
 }
 
 // --------------------------------------------------------------------------- //

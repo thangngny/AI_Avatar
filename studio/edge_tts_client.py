@@ -135,27 +135,37 @@ def list_voices() -> Dict[str, Any]:
     return {"ok": True, "voices": voices, "default": DEFAULT_VOICE, "dynamic": True}
 
 
-async def _synthesize(voice: str, text: str, rate: str, pitch: str, volume: str) -> bytes:
-    """Synthesize text -> raw audio bytes (MP3 stream from Edge TTS)."""
-    buf = io.BytesIO()
-    audio_bytes = 0
-    try:
-        communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, volume=volume)
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                data = chunk.get("data", b"")
-                if data:
-                    buf.write(data)
-                    audio_bytes += len(data)
-    except NoAudioReceived:
-        raise EdgeTTSUnavailable(f"Edge TTS returned no audio for voice={voice}.")
-    except EdgeTTSUnavailable:
-        raise
-    except Exception as e:
-        raise EdgeTTSUnavailable(f"Edge TTS failed: {e}")
-    if audio_bytes <= 0:
-        raise EdgeTTSUnavailable(f"Edge TTS returned no audio for voice={voice}.")
-    return buf.getvalue()
+async def _synthesize(voice: str, text: str, rate: str, pitch: str, volume: str, max_retries: int = 4) -> bytes:
+    """Synthesize text -> raw audio bytes (MP3 stream from Edge TTS) with retry."""
+    last_err = None
+    for attempt in range(1, max_retries + 1):
+        buf = io.BytesIO()
+        audio_bytes = 0
+        try:
+            communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, volume=volume)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    data = chunk.get("data", b"")
+                    if data:
+                        buf.write(data)
+                        audio_bytes += len(data)
+            if audio_bytes > 0:
+                if attempt > 1:
+                    logger.info("edge_tts recovered at attempt %d/%d for voice=%s", attempt, max_retries, voice)
+                return buf.getvalue()
+            last_err = f"Edge TTS returned no audio data for voice={voice}."
+        except NoAudioReceived as e:
+            last_err = f"Edge TTS returned no audio for voice={voice}."
+        except EdgeTTSUnavailable:
+            raise
+        except Exception as e:
+            last_err = f"Edge TTS error: {e}"
+
+        logger.warning("edge_tts attempt %d/%d failed for voice=%s: %s", attempt, max_retries, voice, last_err)
+        if attempt < max_retries:
+            await asyncio.sleep(0.3 * attempt)
+
+    raise EdgeTTSUnavailable(f"Edge TTS returned no audio for voice={voice}. ({last_err})")
 
 
 def _decode_to_pcm(audio_bytes: bytes) -> Tuple[np.ndarray, int]:

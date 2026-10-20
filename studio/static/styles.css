@@ -1107,11 +1107,103 @@ textarea.drag-over{border-color:var(--accent)!important;background:var(--accent-
   border-radius:999px;padding:1px 7px;white-space:nowrap;cursor:default;
 }
 .jtitle .rename-edit-btn{
-  border:none;background:transparent;color:var(--muted2);
-  cursor:pointer;font-size:12px;padding:2px 4px;border-radius:6px;
-  opacity:0;transition:opacity .15s,background .15s;
+  border:1px solid rgba(127,90,240,0.25);background:rgba(127,90,240,0.06);color:var(--text);
+  cursor:pointer;font-size:12px;padding:2px 6px;border-radius:6px;
+  opacity:0.85;transition:opacity .15s,background .15s,border-color .15s;
 }
-.job:hover .rename-edit-btn,.jtitle:hover .rename-edit-btn{opacity:1}
-.rename-edit-btn:hover{background:var(--bg2,#1f1f24);color:var(--text)}
+.job:hover .rename-edit-btn,.jtitle:hover .rename-edit-btn{opacity:1;border-color:var(--accent)}
+.rename-edit-btn:hover{background:var(--accent);color:#fff}
 .player-title{display:flex;align-items:center;gap:8px;min-width:0}
 .player-title b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* Pre-flight Validation Checklist (V1.6.2) */
+.preflight-box{
+  background:var(--panel);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  padding:18px 20px;
+  margin-bottom:18px;
+  box-shadow:var(--shadow);
+}
+.preflight-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:14px;
+  padding-bottom:12px;
+  border-bottom:1px solid var(--border);
+}
+.preflight-title{
+  font-size:15px;
+  font-weight:700;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.preflight-badge{
+  font-size:11px;
+  font-weight:700;
+  padding:4px 10px;
+  border-radius:999px;
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.preflight-badge.good{background:rgba(46,204,113,0.15);color:#2ecc71;border:1px solid rgba(46,204,113,0.3)}
+.preflight-badge.warn{background:rgba(241,196,15,0.15);color:#f1c40f;border:1px solid rgba(241,196,15,0.3)}
+.preflight-badge.bad{background:rgba(231,76,60,0.15);color:#e74c3c;border:1px solid rgba(231,76,60,0.3)}
+.preflight-list{
+  display:flex;
+  flex-direction:column;
+  gap:9px;
+}
+.preflight-item{
+  display:flex;
+  align-items:flex-start;
+  gap:12px;
+  padding:10px 14px;
+  border-radius:var(--radius-sm);
+  background:var(--bg2,rgba(255,255,255,0.03));
+  border:1px solid var(--border2);
+  transition:.15s;
+}
+.preflight-item:hover{
+  border-color:var(--border);
+}
+.preflight-icon{
+  font-size:15px;
+  line-height:1.2;
+  margin-top:2px;
+}
+.preflight-content{
+  flex:1;
+  min-width:0;
+}
+.preflight-item-title{
+  font-size:13px;
+  font-weight:600;
+  color:var(--text);
+  margin-bottom:2px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+}
+.preflight-item-msg{
+  font-size:12px;
+  color:var(--muted);
+  line-height:1.45;
+}
+.preflight-fix-btn{
+  font-size:11px;
+  padding:2px 8px;
+  border-radius:4px;
+  cursor:pointer;
+  background:transparent;
+  border:1px solid var(--accent);
+  color:var(--accent);
+  transition:.14s;
+}
+.preflight-fix-btn:hover{
+  background:var(--accent);
+  color:#fff;
+}

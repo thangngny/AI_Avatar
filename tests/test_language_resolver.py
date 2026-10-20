@@ -482,6 +482,10 @@ class TestEdgeNoElevenMetadata(unittest.TestCase):
             sf.write(out, np.zeros(16000, dtype=np.float32), 16000, subtype="FLOAT")
             return out, 1.0
 
+        orig_settings = el.get_voice_settings
+        orig_models = el.get_models
+        orig_metadata = el.get_voice_metadata
+
         edge.synth_to_wav = fake_edge
         el.get_voice_settings = _trap
         el.get_models = _trap
@@ -494,6 +498,9 @@ class TestEdgeNoElevenMetadata(unittest.TestCase):
         finally:
             edge.is_available = orig_avail
             edge.synth_to_wav = orig_synth
+            el.get_voice_settings = orig_settings
+            el.get_models = orig_models
+            el.get_voice_metadata = orig_metadata
         self.assertTrue(r["ok"])
         self.assertFalse(el_calls["v"])
 
