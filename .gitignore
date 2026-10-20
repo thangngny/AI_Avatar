@@ -4,6 +4,7 @@ build/
 *.egg-info/
 *.so
 *.exe
+!AI_Avatar_Studio.exe
 *.b64
 *.tmp
 *.tmp.*
