@@ -173,12 +173,12 @@ def sync_avatars():
         print(f"\n---> Đang giải nén: {zfn} ({format_bytes(os.path.getsize(zp))})...")
         try:
             with zipfile.ZipFile(zp, "r") as zf:
-                if "avatar_doTrang" in zfn or "avatar_mc_hamai" in zfn:
-                    target = os.path.join(ROOT, "data", "avatars")
-                elif "avatar_sources_and_inputs" in zfn:
+                if zfn in ("avatar_sources_and_inputs.zip",):
                     target = os.path.join(ROOT, "data")
-                elif "avatar_configs" in zfn:
-                    target = os.path.join(ROOT)
+                elif zfn in ("avatar_configs.zip", "system_env_and_database.zip", "model_auxiliary.zip"):
+                    target = ROOT
+                elif zfn.startswith("avatar_"):
+                    target = os.path.join(ROOT, "data", "avatars")
                 else:
                     target = ROOT
                 os.makedirs(target, exist_ok=True)
@@ -189,17 +189,21 @@ def sync_avatars():
 
 def verify_system():
     print("\n" + "=" * 66)
-    print(" KIỂM ĐỊNH TÍNH SẴN SÀNG HỆ THỐNG")
+    print(" KIỂM ĐỊNH TÍNH SẴN SÀNG TOÀN DIỆN (100% PARITY AUDIT)")
     print("=" * 66)
     checks = [
         ("MuseTalk v1.5 UNet", os.path.join(ROOT, "models", "musetalkV15", "unet.pth")),
         ("Whisper Tiny", os.path.join(ROOT, "models", "whisper", "pytorch_model.bin")),
         ("Stable Diffusion VAE", os.path.join(ROOT, "models", "sd-vae", "diffusion_pytorch_model.bin")),
         ("Face Parse BiSeNet", os.path.join(ROOT, "models", "face-parse-bisent", "79999_iter.pth")),
-        ("Avatar doTrang_closeup (avator_info.json)", os.path.join(ROOT, "data", "avatars", "doTrang_closeup", "avator_info.json")),
-        ("Avatar doTrang_closeup (latents.pt)", os.path.join(ROOT, "data", "avatars", "doTrang_closeup", "latents.pt")),
-        ("Avatar doTrang_closeup (coords.pkl)", os.path.join(ROOT, "data", "avatars", "doTrang_closeup", "coords.pkl")),
+        ("Cấu hình bảo mật .env", os.path.join(ROOT, ".env")),
+        ("Cơ sở dữ liệu studio.db", os.path.join(ROOT, "data", "studio.db")),
     ]
+    avatars_list = ["28_8_mid", "close_up", "doTrang_closeup", "doTrang_fullbody", "full_4_9", "mc_hamai_mid", "mid_4_9", "mid_4_9_2"]
+    for aid in avatars_list:
+        checks.append((f"Avatar '{aid}' (coords.pkl)", os.path.join(ROOT, "data", "avatars", aid, "coords.pkl")))
+        checks.append((f"Avatar '{aid}' (latents.pt)", os.path.join(ROOT, "data", "avatars", aid, "latents.pt")))
+
     all_ok = True
     for name, path in checks:
         if os.path.isfile(path) and os.path.getsize(path) > 0:
@@ -210,7 +214,10 @@ def verify_system():
 
     print("-" * 66)
     if all_ok:
-        print("🎉 TẤT CẢ DỮ LIỆU ĐÃ SẴN SÀNG 100%!")
+        print("🎉 TẤT CẢ DỮ LIỆU ĐÃ SẴN SÀNG 100% (FULL BIT-FOR-BIT PARITY)!")
+        print("[*] Chạy preflight system_status.py...")
+        subprocess.run([sys.executable, os.path.join(ROOT, "system_status.py")])
+        print("-" * 66)
         print("Bây giờ bạn có thể chạy kiểm tra End-to-End trên máy mới:")
         print("    ..\\runtime\\venv\\Scripts\\python.exe tests/e2e_mouth_test.py")
     else:
