@@ -15,6 +15,28 @@ def _match_skin_lab(source, generated, skin_mask):
     if np.count_nonzero(valid) < 100:
         return generated
 
+    # Fast vectorised C++ path (Reinhard LAB transfer) for NextGen
+    fast_match = _env_bool("LIVETALKING_FAST_SKIN_MATCH", True)
+    if fast_match:
+        mask_u8 = (valid.astype(np.uint8)) * 255
+        src_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB)
+        gen_lab = cv2.cvtColor(generated, cv2.COLOR_BGR2LAB)
+        src_m, src_s = cv2.meanStdDev(src_lab, mask=mask_u8)
+        gen_m, gen_s = cv2.meanStdDev(gen_lab, mask=mask_u8)
+        src_m = src_m.flatten()
+        gen_m = gen_m.flatten()
+        src_s = src_s.flatten()
+        gen_s = gen_s.flatten()
+
+        scale = np.clip(src_s / np.maximum(gen_s, 1.0), 0.85, 1.15)
+        max_shift = np.array([12.0, 8.0, 8.0], dtype=np.float32)
+        shift = np.clip(src_m - gen_m, -max_shift, max_shift)
+
+        gen_f = gen_lab.astype(np.float32)
+        gen_f = (gen_f - gen_m) * scale + gen_m + shift
+        gen_lab = np.clip(gen_f, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(gen_lab, cv2.COLOR_LAB2BGR)
+
     src_lab = cv2.cvtColor(source, cv2.COLOR_BGR2LAB).astype(np.float32)
     gen_lab = cv2.cvtColor(generated, cv2.COLOR_BGR2LAB).astype(np.float32)
     max_shift = (12.0, 8.0, 8.0)
@@ -87,8 +109,11 @@ def get_image_blending(image, face, face_box, mask_array, crop_box):
     if paste_h > 0 and paste_w > 0:
         face_large[y_off:y_off + paste_h, x_off:x_off + paste_w] = face[:paste_h, :paste_w]
 
-    mask_image = cv2.cvtColor(mask_array, cv2.COLOR_BGR2GRAY)
-    mask_image = (mask_image / 255).astype(np.float32)
+    if mask_array.ndim == 2 and mask_array.dtype == np.float32:
+        mask_image = mask_array
+    else:
+        mask_image = cv2.cvtColor(mask_array, cv2.COLOR_BGR2GRAY) if mask_array.ndim == 3 else mask_array
+        mask_image = (mask_image / 255.0).astype(np.float32)
 
     # Guard: mask and crop may differ by 1px after 1080p downscale of a 4K avatar.
     # blendLinear requires identical sizes, otherwise it raises and paste_back fails.
@@ -97,8 +122,12 @@ def get_image_blending(image, face, face_box, mask_array, crop_box):
 
     face_large = _prepare_hybrid_generated(body[y_s:y_e, x_s:x_e], face_large, mask_image)
 
+    # NextGen: Gaussian soft feathering for seamless skin/chin boundary
+    soft_feather = _env_bool("LIVETALKING_SOFT_FEATHER", True)
+    blend_mask = cv2.GaussianBlur(mask_image, (7, 7), 2.0) if soft_feather else mask_image
+
     body[y_s:y_e, x_s:x_e] = cv2.blendLinear(
-        face_large, body[y_s:y_e, x_s:x_e], mask_image, 1 - mask_image
+        face_large, body[y_s:y_e, x_s:x_e], blend_mask, 1.0 - blend_mask
     )
 
     return body

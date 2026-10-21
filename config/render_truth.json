@@ -1,8 +1,8 @@
 {
   "pipeline": "musetalk_v15",
-  "audio_gain": 1.5,
-  "audio_context_left": 0,
-  "audio_feature_offset_frames": -3,
+  "audio_gain": 1.15,
+  "audio_context_left": 3,
+  "audio_feature_offset_frames": -1,
   "fps": 25,
   "resolution_width": 1080,
   "resolution_height": 1920,

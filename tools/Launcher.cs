@@ -12,7 +12,7 @@ namespace AIAvatarStudio
         [STAThread]
         static void Main(string[] args)
         {
-            string url = "http://127.0.0.1:8077";
+            string url = "http://127.0.0.1:8078";
             string baseDir = AppDomain.CurrentDomain.BaseDirectory;
 
             // Auto-create Desktop Shortcut on first run
@@ -37,7 +37,7 @@ namespace AIAvatarStudio
                 // Start Studio server in background
                 ProcessStartInfo psi = new ProcessStartInfo();
                 psi.FileName = pythonPath;
-                psi.Arguments = "run_studio.py --no-browser --port 8077";
+                psi.Arguments = "run_studio.py --no-browser --port 8078";
                 psi.WorkingDirectory = baseDir;
                 psi.UseShellExecute = false;
                 psi.CreateNoWindow = true; // Silently runs in background
@@ -78,8 +78,8 @@ namespace AIAvatarStudio
             try
             {
                 string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                string lnkPath = Path.Combine(desktop, "AI Avatar Studio.lnk");
-                string exePath = Path.Combine(baseDir, "AI_Avatar_Studio.exe");
+                string lnkPath = Path.Combine(desktop, "AI Avatar Studio NextGen.lnk");
+                string exePath = Path.Combine(baseDir, "AI_Avatar_NextGen.exe");
                 if (!File.Exists(lnkPath) && File.Exists(exePath))
                 {
                     Type shellType = Type.GetTypeFromProgID("WScript.Shell");
@@ -89,7 +89,7 @@ namespace AIAvatarStudio
                         dynamic sc = shell.CreateShortcut(lnkPath);
                         sc.TargetPath = exePath;
                         sc.WorkingDirectory = baseDir;
-                        sc.Description = "AI Avatar Studio - Tạo Video AI Avatar";
+                        sc.Description = "AI Avatar Studio NextGen (RTX 5090 Blackwell Edition)";
                         sc.Save();
                     }
                 }
@@ -119,6 +119,7 @@ namespace AIAvatarStudio
         {
             string[] candidates = new string[]
             {
+                Path.Combine(baseDir, @"..\runtime_nextgen\venv\Scripts\python.exe"),
                 Path.Combine(baseDir, @"..\runtime\venv\Scripts\python.exe"),
                 @"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
                 @"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",

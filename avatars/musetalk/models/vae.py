@@ -99,6 +99,20 @@ class VAE():
         :param latents: The latent variables to decode.
         :return: A NumPy array representing the decoded image.
         """
+        total = latents.shape[0]
+        chunk_size = 32
+        if total > chunk_size:
+            out_list = []
+            for start in range(0, total, chunk_size):
+                sub_lat = (1 / self.scaling_factor) * latents[start:start+chunk_size]
+                sub_img = self.vae.decode(sub_lat.to(self.vae.dtype)).sample
+                sub_img = (sub_img / 2 + 0.5).clamp(0, 1)
+                sub_img = sub_img.detach().cpu().permute(0, 2, 3, 1).float().numpy()
+                sub_img = (sub_img * 255).round().astype("uint8")
+                sub_img = sub_img[..., ::-1]
+                out_list.append(sub_img)
+            return np.concatenate(out_list, axis=0)
+
         latents = (1/  self.scaling_factor) * latents
         image = self.vae.decode(latents.to(self.vae.dtype)).sample
         image = (image / 2 + 0.5).clamp(0, 1)

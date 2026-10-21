@@ -26,6 +26,7 @@ def _resolve_canonical_interpreter() -> str:
     if env_override:
         return env_override
     candidates = [
+        os.path.normpath(os.path.join(ROOT, '..', 'runtime_nextgen', 'venv', 'Scripts', 'python.exe')),
         r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
         r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
         os.path.normpath(os.path.join(ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),
