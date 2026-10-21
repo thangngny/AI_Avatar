@@ -1,8 +1,17 @@
-# AI Avatar Studio
+# AI Avatar Studio (NextGen RTX 5090 Blackwell Edition)
 
-A local, operator-focused studio for preparing Vietnamese-speaking AI avatar videos.
-You prepare an avatar, write a script, pick a voice, preview the reading, and render
-the final video with the existing MuseTalk v1.5 production renderer.
+A high-performance workstation AI Avatar studio optimized for the **NVIDIA GeForce RTX 5090 (32GB GDDR7, sm_120)**, **Intel Core i9-14900KF**, and **128GB DDR5**.
+
+> [!IMPORTANT]
+> **NextGen RTX 5090 Enhancements:**
+> - **End-to-End Realtime Render**: 24+ FPS E2E Full HD 1080x1920 (5.2x speedup over RTX 3090).
+> - **Natural Biological Lipsync**: udio_gain = 1.15, -40ms offset, context 3, zero rubber mouth.
+> - **Continuous Forward Body Momentum**: Calibrated forward-cycle [325:525], zero ping-pong rewinding.
+> - **6-DoF Audio Prosody Expressive Motion**: Spring-damper neck physics nodding & gaze drift (>4,300 FPS on GPU).
+> - **Cinema Master 60 FPS**: Hardware-interpolated ultra-smooth motion display.
+> - **Automatic Google Drive Sync**: Instant cloud mirroring to G:\My Drive\AI_Avatar_Outputs\.
+> 
+> Full technical specifications & benchmarks: [NEXTGEN_RTX5090_SPECIFICATION_AND_BENCHMARK_REPORT.md](docs/NEXTGEN_RTX5090_SPECIFICATION_AND_BENCHMARK_REPORT.md).
 
 > **Note:** This project is a derivative of the
 > [NeolabAI/avatar_livestream](https://github.com/NeolabAI/avatar_livestream) /
