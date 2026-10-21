@@ -250,7 +250,7 @@ def _build_graph_runner(model, batch_size, model_dtype):
     return runner, ok
 
 
-def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=48, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0, master_audio=None, smooth_60fps=False):
+def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=48, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0, master_audio=None, smooth_60fps=False, expressive_motion=False):
     setup_torch_flags()
     vae, unet, pe, timesteps, audio_processor = model
     frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle = avatar_data
@@ -348,6 +348,14 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     if face_enhance:
         print('[face_enhance] Notice: GFPGAN face restoration disabled for partial mouth crops to prevent black mouth distortion.')
 
+    motion_controller = None
+    prosody = None
+    if expressive_motion:
+        from avatars.expressive_motion import ExpressiveMotionController
+        motion_controller = ExpressiveMotionController(fps=fps, sample_rate=sr, device=device)
+        prosody = motion_controller.analyze_audio_prosody(wav_data, num_frames)
+        print('[expressive_motion] NextGen 6-DoF Audio Prosody Dynamics ENABLED (Spring-damper neck physics active)!')
+
     print('Preparing audio features per frame...')
     all_whisper_chunks = []
     feat_mult = 50 // fps  # 2 feature positions per video frame
@@ -430,6 +438,7 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
             pred = vae.decode_latents(pred_latents)
             if enhancer is not None:
                 pred = enhancer.enhance_faces(list(pred))
+            batch_frames = []
             for j in range(actual_batch):
                 idx = (i + j) % length
                 bbox = coord_list_cycle[idx]
@@ -439,13 +448,27 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
                 ori_frame = frame_list_cycle[idx].copy()
                 wj, hj = x2 - x1, y2 - y1
                 if wj <= 0 or hj <= 0 or x1 < 0 or y1 < 0:
-                    pipe.stdin.write(ori_frame.tobytes())
+                    batch_frames.append(ori_frame)
                     continue
                 interp = cv2.INTER_AREA if (pred[j].shape[1] >= wj and pred[j].shape[0] >= hj) else cv2.INTER_LANCZOS4
                 res_frame = cv2.resize(pred[j].astype(np.uint8), (wj, hj), interpolation=interp)
                 combine_frame = get_image_blending(ori_frame, res_frame, (x1, y1, x2, y2),
                                                    mask_list_cycle[idx], mask_coords_list_cycle[idx])
-                pipe.stdin.write(combine_frame.tobytes())
+                batch_frames.append(combine_frame)
+
+            if motion_controller is not None and prosody is not None:
+                # Apply 6-DoF GPU batch expressive warp (neck nod & gaze drift in FP16)
+                frames_np = np.stack(batch_frames, axis=0)
+                t_frames = torch.from_numpy(frames_np).permute(0, 3, 1, 2).to(device=device, dtype=torch.float16, non_blocking=True)
+                nods = [prosody['pitch_nod'][i+j] for j in range(actual_batch)]
+                drifts = [prosody['yaw_drift'][i+j] for j in range(actual_batch)]
+                tilts = [prosody['roll_tilt'][i+j] for j in range(actual_batch)]
+                ref_bbox = mask_coords_list_cycle[0]
+                warped_t = motion_controller.apply_batch_expressive_warp(t_frames, ref_bbox, nods, drifts, tilts)
+                batch_frames = list(warped_t.permute(0, 2, 3, 1).byte().cpu().numpy())
+
+            for f in batch_frames:
+                pipe.stdin.write(f.tobytes())
                 frames_done += 1
     finally:
         try:
@@ -555,6 +578,7 @@ def main():
                         help='EdgeTTS voice (convenience; NOT part of the render truth)')
     parser.add_argument('--batch_size', type=int, default=48, help='Batch size for UNet/VAE inference (NextGen RTX 5090 default 48)')
     parser.add_argument('--smooth_60fps', action='store_true', help='NextGen 60 FPS cinema motion smoothing')
+    parser.add_argument('--expressive_motion', action='store_true', help='Audio-driven prosodic head nodding & gaze dynamics')
     parser.add_argument('--split_by', choices=['line','sentence','all'], default='sentence')
     parser.add_argument('--face_enhance', action='store_true',
                         help='Enable GFPGAN face restoration (needs models/GFPGANv1.4.pth)')
@@ -635,7 +659,8 @@ def main():
                      audio_context_left=eff['audio_context_left'],
                      audio_conditioning_gain=eff['audio_conditioning_gain'],
                      master_audio=master_audio,
-                     smooth_60fps=args.smooth_60fps)
+                     smooth_60fps=args.smooth_60fps,
+                     expressive_motion=args.expressive_motion)
 
     setup_torch_flags()
 
