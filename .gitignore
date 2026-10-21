@@ -103,3 +103,5 @@ docs/*.7z
 handover/
 # Private / commercial test script (customer narration content, not a generic demo).
 input4_9/
+
+dist_assets/

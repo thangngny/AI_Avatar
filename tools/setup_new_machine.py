@@ -138,12 +138,14 @@ avatar_count = len([d for d in os.listdir(avatars_dir) if os.path.isdir(os.path.
 if model_count > 0:
     print(f"  [OK] Thư mục models đã có dữ liệu ({model_count} mục/tệp).")
 else:
-    print("  [CHÚ Ý] Thư mục models đang trống! Vui lòng copy thư mục 'models' (~8.6 GB) từ máy cũ sang.")
+    print("  [CHÚ Ý] Thư mục models đang trống! Có thể tải tự động bằng lệnh:")
+    print("         python tools/download_cloud_assets.py")
 
 if avatar_count > 0:
     print(f"  [OK] Thư mục data/avatars đã có {avatar_count} Avatar sẵn sàng.")
 else:
-    print("  [CHÚ Ý] Thư mục data/avatars đang trống! Vui lòng copy 'data/avatars' (~12.9 GB) từ máy cũ sang.")
+    print("  [CHÚ Ý] Thư mục data/avatars đang trống! Có thể tải tự động bằng lệnh:")
+    print("         python tools/download_cloud_assets.py (hoặc Nhan_Data_Tu_Cloud.bat)")
 
 # 7. Biên dịch Launcher EXE và tạo Desktop Shortcut
 print("\n[7/7] Thiết lập tệp thực thi AI_Avatar_Studio.exe & Biểu tượng Desktop...")
