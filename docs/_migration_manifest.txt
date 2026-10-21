@@ -1,0 +1,10 @@
+MIGRATION MANIFEST Wed Aug 26 10:40:15 SEAST 2026
+moved: SYSTEM_7PART_RENDER_CONFIG_AUDIT.md, README_target.txt, SYSTEM_BEST_RAW_AVATAR_SOURCE_AUDIT.md -> archive/reports/
+moved: quickstart.md -> docs/
+moved: script_*.txt (11) -> data/input/scripts/
+moved: Hearing-1.mp4, half.mp4 -> data/input/avatar_sources/
+deleted: temp*.mp4 temp*.aac (16 disposable uuid render outputs)
+deleted: zero-byte junk (torchaudio.functional.resample, utils.app_root.app_root(), _pa_stdout.log, build_run2.err.log, build_run3.err.log)
+deleted: livetalking.log (903MB realtime runtime log, regenerable)
+moved: stray build logs -> logs/
+DONE phase A

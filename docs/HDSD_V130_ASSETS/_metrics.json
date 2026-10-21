@@ -1,0 +1,259 @@
+{
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "data_theme": "light",
+  "model_image_vision": false,
+  "console_errors": [],
+  "page_errors": [],
+  "failed_requests": [],
+  "screenshots": [
+    {
+      "file": "01_home.png",
+      "required_text": {
+        "AI AVATAR STUDIO": true,
+        "Tạo video từ Avatar có sẵn": true,
+        "Tạo AI Avatar mới": true,
+        "BẮT ĐẦU": true,
+        "TẠO AVATAR": true,
+        "Thư viện": true,
+        "Lịch sử": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 63452,
+      "route": "home",
+      "purpose": "Explain where a new user starts"
+    },
+    {
+      "file": "02_create_video_choose_avatar.png",
+      "required_text": {
+        "Tạo video từ Avatar có sẵn": true,
+        "Chọn Avatar": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 83993,
+      "route": "quick (step 1)",
+      "purpose": "Choose an existing Avatar"
+    },
+    {
+      "file": "03_create_video_script.png",
+      "required_text": {
+        "Nhập nội dung": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 77262,
+      "route": "quick (step 2)",
+      "purpose": "Enter the script the Avatar will speak"
+    },
+    {
+      "file": "04_create_video_voice.png",
+      "required_text": {
+        "Chọn giọng": true,
+        "ELEVENLABS": true,
+        "Giọng chất lượng cao": true,
+        "TEST MIỄN PHÍ": true,
+        "Edge TTS": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 74842,
+      "route": "quick (step 3)",
+      "purpose": "Choose voice: ElevenLabs vs free Edge TTS test"
+    },
+    {
+      "file": "05_mouth_test.png",
+      "required_text": {
+        "Kiểm tra": true,
+        "TEST KHẨU HÌNH": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 69431,
+      "route": "quick (step 4)",
+      "purpose": "Free mouth-motion test before final render"
+    },
+    {
+      "file": "06_create_video_render.png",
+      "required_text": {
+        "TẠO VIDEO": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 69431,
+      "route": "quick (step 5)",
+      "purpose": "Create the final production video"
+    },
+    {
+      "file": "07_create_avatar_overview.png",
+      "required_text": {
+        "Tạo AI Avatar mới": true,
+        "Video mẫu": true,
+        "Yêu cầu video": true,
+        "Upload video": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 383378,
+      "route": "create (top)",
+      "purpose": "Overview of the 5-step create-Avatar flow"
+    },
+    {
+      "file": "08_avatar_source_requirements.png",
+      "required_text": {
+        "30–60 giây": true,
+        "Khung dọc 9:16": true,
+        "Mặt đủ lớn": true,
+        "Gần chính diện": true,
+        "Không nói": true,
+        "Đủ môi + cằm": true,
+        "Camera cố định": true,
+        "Ánh sáng ổn": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 62156,
+      "route": "create (step 2)",
+      "purpose": "Source video requirements with icons"
+    },
+    {
+      "file": "09_avatar_upload.png",
+      "required_text": {
+        "Upload video": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 42110,
+      "route": "create (step 3)",
+      "purpose": "Large dropzone to upload source video"
+    },
+    {
+      "file": "10_avatar_quality_check.png",
+      "required_text": {
+        "Kiểm tra video": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 60478,
+      "route": "create (step 4)",
+      "purpose": "Automatic source quality check (Tốt/Cần lưu ý)"
+    },
+    {
+      "file": "11_create_avatar_action.png",
+      "required_text": {
+        "TẠO AVATAR": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 64472,
+      "route": "create (step 5)",
+      "purpose": "Name and create the new Avatar (pre-launch state)"
+    },
+    {
+      "file": "12_avatar_library.png",
+      "required_text": {
+        "Thư viện Avatar": true,
+        "Chọn Avatar": true,
+        "Xem chi tiết": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 281919,
+      "route": "library",
+      "purpose": "Browse real Avatar cards with quality status",
+      "cards": 18,
+      "thumbs": 18,
+      "open_details": 0
+    },
+    {
+      "file": "13_avatar_details.png",
+      "required_text": {
+        "doTrang_closeup": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 227461,
+      "route": "library -> modal",
+      "purpose": "Human-readable source/prepared/production detail",
+      "open_details": 0
+    },
+    {
+      "file": "14_render_queue.png",
+      "required_text": {
+        "HÀNG ĐỢI RENDER": true,
+        "Đang nghỉ": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 63450,
+      "route": "home (queue bar)",
+      "purpose": "Render queue state (idle)",
+      "queue_state": "IDLE_QUEUE"
+    },
+    {
+      "file": "15_render_history.png",
+      "required_text": {
+        "Lịch sử render": true,
+        "Xem video": true,
+        "Tải video": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 163997,
+      "route": "history",
+      "purpose": "Visual render history with TEST vs VIDEO HOÀN CHỈNH",
+      "jobs": 21
+    },
+    {
+      "file": "16_system_ready.png",
+      "required_text": {
+        "AI Avatar": true,
+        "GPU": true,
+        "ElevenLabs": true,
+        "Edge TTS": true
+      },
+      "overflow_x": false,
+      "scrollW": 1920,
+      "clientW": 1920,
+      "clipped_primary_text": [],
+      "png_bytes": 48086,
+      "route": "status",
+      "purpose": "System readiness summary; advanced details collapsed",
+      "hero": "HỆ THỐNG SẴN SÀNG",
+      "open_details": 0
+    }
+  ]
+}

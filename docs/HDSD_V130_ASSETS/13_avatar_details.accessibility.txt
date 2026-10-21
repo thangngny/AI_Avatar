@@ -1,0 +1,78 @@
+Trang chủ
+SẴN SÀNG
+Tạo video
+Tạo Avatar
+Thư viện Avatar
+Lịch sử render
+Trạng thái hệ thống
+Cài đặt
+Đánh giá tất cả
+Tất cả
+Sẵn sàng
+Rất tốt
+Tốt
+Cảnh báo
+Chưa hoàn tất
+cu_recon_em10_jaw
+TỐT
+Chọn Avatar
+Xem chi tiết
+cu_recon_em10_mouthchin
+cu_recon_em20_jaw
+doTrang_closeup
+doTrang_fullbody
+mc_hamai_mid
+Không khuyến nghị
+23_7_avt
+Chưa có dữ liệu
+30_7close
+close_up
+Chưa đủ dữ liệu
+close_up_16_7
+fulbody_2_8
+full_body_16_7
+fullbody_30_7
+fullbody_30_7_25fps
+fullbody_30_7_jaw
+fullbody_30_7_mouth_chin
+fullbody_30_7_stable
+30_7_fullbody
+CHƯA HOÀN TẤT
+HÀNG ĐỢI RENDER
+Kích thước khuôn mặt Tốt Khuôn mặt đủ lớn để hệ thống nhận diện môi rõ.
+Kích thước khuôn mặt
+Độ nét khuôn mặt Rất tốt Khuôn mặt và vùng môi rất sắc nét.
+Độ nét khuôn mặt
+Góc mặt Rất tốt Nhân vật nhìn chính diện, rất phù hợp lipsync.
+Góc mặt
+Miệng nhìn rõ Tốt Miệng nhìn rõ trong khung.
+Miệng nhìn rõ
+Cằm / đường hàm Tốt Cằm và đường hàm đầy đủ giúp vùng ghép miệng ổn định.
+Cằm / đường hàm
+Trạng thái miệng nguồn Tốt Miệng trung tính trong video gốc — phù hợp.
+Trạng thái miệng nguồn
+Độ ổn định chuyển động Tốt Chuyển động nhẹ và tự nhiên, phù hợp AI Avatar.
+Độ ổn định chuyển động
+Ánh sáng Tốt Ánh sáng ổn định giúp khuôn mặt giữ chất lượng đồng đều.
+Ánh sáng
+Số frame / tính toàn vẹn Tốt 980 frame, đầy đủ full_imgs/mask/coords.
+Số frame / tính toàn vẹn
+Độ phân giải đã chuẩn bị Chưa có dữ liệu 1080×1920
+Độ phân giải đã chuẩn bị
+Phiên bản Chưa có dữ liệu v15
+Phiên bản
+Chế độ parsing Chưa có dữ liệu jaw
+Chế độ parsing
+Kích thước vùng mặt (đã chuẩn bị) Tốt Tỉ lệ mặt/frame ≈ 0.117.
+Kích thước vùng mặt (đã chuẩn bị)
+Bao phủ vùng cằm/miệng Tốt Không gian dưới mặt ≈ 4.51× chiều cao mặt.
+Bao phủ vùng cằm/miệng
+Độ ổn định vị trí crop Tốt Độ lệch trung bình ≈ 2.4px.
+Độ ổn định vị trí crop
+Độ nét vùng mặt (đã chuẩn bị) Tốt Độ nét vùng mặt (Laplacian) ≈ 293.6.
+Độ nét vùng mặt (đã chuẩn bị)
+Độ ổn định chuyển động (prepared) Tốt Mean frame-to-frame diff ≈ 3.95.
+Độ ổn định chuyển động (prepared)
+Độ ổn định mask Tốt Hệ số biến thiên diện tích mask ≈ 0.021.
+Độ ổn định mask
+Đóng

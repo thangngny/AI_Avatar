@@ -1,0 +1,41 @@
+Trang chủ
+SẴN SÀNG
+Tạo video
+Tạo Avatar
+Thư viện Avatar
+Lịch sử render
+Trạng thái hệ thống
+Cài đặt
+Đánh giá tất cả
+Tất cả
+Sẵn sàng
+Rất tốt
+Tốt
+Cảnh báo
+Chưa hoàn tất
+cu_recon_em10_jaw
+TỐT
+Chọn Avatar
+Xem chi tiết
+cu_recon_em10_mouthchin
+cu_recon_em20_jaw
+doTrang_closeup
+doTrang_fullbody
+mc_hamai_mid
+Không khuyến nghị
+23_7_avt
+Chưa có dữ liệu
+30_7close
+close_up
+Chưa đủ dữ liệu
+close_up_16_7
+fulbody_2_8
+full_body_16_7
+fullbody_30_7
+fullbody_30_7_25fps
+fullbody_30_7_jaw
+fullbody_30_7_mouth_chin
+fullbody_30_7_stable
+30_7_fullbody
+CHƯA HOÀN TẤT
+HÀNG ĐỢI RENDER

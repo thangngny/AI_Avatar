@@ -1,0 +1,107 @@
+__pycache__/
+.pyarmor/
+build/
+*.egg-info/
+*.so
+*.exe
+!AI_Avatar_Studio.exe
+*.b64
+*.tmp
+*.tmp.*
+*.mp4
+
+# Local runtime/debug artifacts (not source)
+diagnostics/
+.launch_config.json
+launch_config.json
+record_config.json
+.restart_requested
+*.aac
+*.wav
+*.mp3
+*.m4a
+*.avi
+*.mov
+.env
+.venv/
+venv/
+venv_musetalk/
+.cache/
+.downloads/
+.hf_cache/
+.tmp/
+logs/
+outputs/
+streamout/
+chat_history/
+
+tmp*
+temp*
+trial*/
+torchaudio.functional.resample
+utils.app_root.app_root()
+
+data
+data_utils/face_tracking/3DMM/*
+data_utils/face_parsing/79999_iter.pth
+
+pretrained
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.onnx
+*.engine
+*.bin
+*.pkl
+*.npy
+*.npz
+*.mp4
+.DS_Store
+
+# Studio operator sample asset (V1.1.6): the small re-encoded example MP4 used
+# in the guided "Tạo AI Avatar mới" flow. Deliberately tracked as a UI asset —
+# it is tiny (~3.5 MB), browser-safe H.264, and documented by manifest.json.
+!studio/static/assets/avatar_source_example/sample.mp4
+workspace/log_ngp.txt
+.idea
+/models/
+*.log
+dist
+gfpgan/weights/
+avatars/wav2lip/face_detection/detection/sfd/*.pth
+
+# Raw input workspace (mc_hamai photo-avatar source + recording scripts); like data/, kept on disk only
+input_25_8/
+input/
+
+# Trusted-collaborator sharing runtime state (PIDs, tunnel URL) — never commit;
+# the access code / API key are NEVER written here (spec §29).
+diagnostics/share_runtime.json
+diagnostics/*.log
+diagnostics/*.err.log
+
+# One-off acceptance-test driver scripts (hardcoded ephemeral tunnel URL). The
+# chunked-upload + share-gate mechanism has permanent coverage in
+# tests/test_studio.py (TestChunkedUpload, TestShareGate).
+_drive_upload.py
+_cleanup_uploads.py
+
+# AI Avatar Studio runtime (DB, temp audio, prep logs) — under data/, already
+# ignored, but make it explicit so the local studio state is never committed.
+data/studio_runtime/
+
+# --- V1.6 release safety (narrow) -------------------------------------------
+# Internal / one-off acceptance + audit scripts (underscore-prefixed). Permanent
+# tools (restart_studio.py, verify_runtime.py, rebuild_runtime.ps1) are NOT
+# underscore-prefixed and remain tracked.
+tools/_*.py
+# Redundant compressed duplicates of the readable docs/HDSD_V1*0_ASSETS/ folders.
+docs/*.zip
+docs/*.7z
+# Internal V1.4.x technology-handover packages (not V1.6 product source).
+handover/
+# Private / commercial test script (customer narration content, not a generic demo).
+input4_9/
+
+dist_assets/
