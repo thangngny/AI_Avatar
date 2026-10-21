@@ -214,8 +214,10 @@ class TestRenderJobs(StudioTestCase):
         if not ready:
             self.skipTest("no prepared avatar on disk")
         av = ready[0]["avatar_id"]
+        cfg = {"model_id": "eleven_turbo_v2_5", "voice_settings": {"stability": 0.5}}
         r = render_service.create_full_jobs(av, "pGapy9MNHCukzJtjavF0",
-                                             "Xin chào. Đây là test.", "full")
+                                             "Xin chào. Đây là test.", "full",
+                                             tts_config=cfg)
         self.assertTrue(r["ok"])
         self.assertGreaterEqual(len(r["job_ids"]), 1)
         job = db.get_job(r["job_ids"][0])

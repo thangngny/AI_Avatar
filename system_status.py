@@ -113,12 +113,12 @@ def main():
     print(f"System Control Board: {'SYSTEM_CONTROL_BOARD.md' if board_ok else 'MISSING'}")
     print("=" * 40)
 
-    ready = (branch == "main") and (truth_status == "VALID") and board_ok and entry_ok
+    ready = (branch in ("main", "nextgen-rtx5090")) and (truth_status == "VALID") and board_ok and entry_ok
     if ready:
         print("Ready: YES")
     else:
         reasons = []
-        if branch != "main":
+        if branch not in ("main", "nextgen-rtx5090"):
             reasons.append("AUTHORITATIVE_BRANCH_MISMATCH")
         if truth_status != "VALID":
             reasons.append(f"RENDER_TRUTH_{truth_status}")

@@ -37,7 +37,7 @@ MODEL_URLS = [
     # MuseTalk v1.5 UNet
     ("models/musetalkV15/unet.pth", "https://huggingface.co/TMElyralab/MuseTalk/resolve/main/musetalkV15/unet.pth"),
     ("models/musetalkV15/musetalk.json", "https://huggingface.co/TMElyralab/MuseTalk/resolve/main/musetalkV15/musetalk.json"),
-    
+
     # SD-VAE
     ("models/sd-vae/diffusion_pytorch_model.bin", "https://huggingface.co/stabilityai/sd-vae-ft-mse/resolve/main/diffusion_pytorch_model.bin"),
     ("models/sd-vae/config.json", "https://huggingface.co/stabilityai/sd-vae-ft-mse/resolve/main/config.json"),
@@ -151,16 +151,59 @@ def sync_avatars():
     dist_dir = os.path.join(ROOT, "dist_assets")
     os.makedirs(dist_dir, exist_ok=True)
 
-    # Check if gh CLI is available
+        # Check if gh CLI is available
     has_gh = shutil.which("gh") is not None
+    gh_success = False
     if has_gh:
-        print(f"[*] Sử dụng GitHub CLI (gh) để tải release {RELEASE_TAG}...")
+        print(f"[*] Thử sử dụng GitHub CLI (gh) để tải release {RELEASE_TAG}...")
         cmd = ["gh", "release", "download", RELEASE_TAG, "--repo", GITHUB_REPO, "--dir", dist_dir, "--clobber"]
         res = subprocess.run(cmd)
-        if res.returncode != 0:
-            print(f"[!] 'gh release download' trả về mã lỗi {res.returncode}. Thử tải dự phòng...")
+        if res.returncode == 0:
+            gh_success = True
+        else:
+            print(f"[!] 'gh release download' trả về mã lỗi {res.returncode}. Chuyển sang tải trực tiếp qua GitHub API CDN...")
     else:
-        print("[*] GitHub CLI chưa được cài đặt. Đang kiểm tra release assets...")
+        print("[*] GitHub CLI chưa được cài đặt. Tải trực tiếp qua GitHub API...")
+
+    if not gh_success:
+        try:
+            api_url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/tags/{RELEASE_TAG}"
+            req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                rel_data = json.loads(resp.read().decode())
+                assets = rel_data.get("assets", [])
+                print(f"[*] Tìm thấy {len(assets)} assets trên GitHub Release {RELEASE_TAG}:")
+                for a in assets:
+                    aname = a["name"]
+                    asize = a["size"]
+                    adownload = a["browser_download_url"]
+                    dst = os.path.join(dist_dir, aname)
+                    if os.path.isfile(dst) and os.path.getsize(dst) == asize:
+                        print(f"  [ĐÃ CÓ SẴN] {aname} ({format_bytes(asize)})")
+                        continue
+                    print(f"\n---> Đang tải từ Cloud: {aname} ({format_bytes(asize)})...")
+                    download_http_with_progress(adownload, dst, desc=aname)
+        except Exception as e:
+            print(f"[!] Lỗi khi truy vấn GitHub Release API: {e}")
+
+    # Merge multipart zips if any
+    part_groups = {}
+    for fn in os.listdir(dist_dir):
+        if ".zip.part" in fn:
+            base_zip = fn.split(".part")[0]
+            part_groups.setdefault(base_zip, []).append(fn)
+
+    for base_zip, parts in part_groups.items():
+        parts.sort()
+        combined_path = os.path.join(dist_dir, base_zip)
+        if not os.path.isfile(combined_path):
+            print(f"\n---> Đang ghép {len(parts)} phần của {base_zip}...")
+            with open(combined_path, "wb") as out_f:
+                for p in parts:
+                    part_p = os.path.join(dist_dir, p)
+                    with open(part_p, "rb") as in_f:
+                        shutil.copyfileobj(in_f, out_f)
+            print(f"  [OK] Đã ghép thành công: {base_zip} ({format_bytes(os.path.getsize(combined_path))})")
 
     # Extract all downloaded zips
     zips = [f for f in os.listdir(dist_dir) if f.endswith(".zip")]

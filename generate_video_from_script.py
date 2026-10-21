@@ -33,6 +33,7 @@ import argparse, os, sys, re, subprocess, tempfile, json
 import cv2, numpy as np, torch, pickle, glob, soundfile as sf
 from tqdm import tqdm
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
 from avatars.musetalk.utils.utils import load_all_model
 from avatars.musetalk.myutil import get_image_blending
 from avatars.musetalk.whisper.audio2feature import Audio2Feature
@@ -181,6 +182,31 @@ def load_avatar_data(avatar_id):
                                max(2, int(round(m.shape[0] * _scale)))))
                 for m in mask_list_cycle
             ]
+    # NextGen: check loop_profile in avator_info.json for forward-only continuous playback
+    info_path = f'{p}/avator_info.json'
+    if os.path.exists(info_path):
+        try:
+            with open(info_path, 'r', encoding='utf-8') as f:
+                info_data = json.load(f)
+                lp = info_data.get('loop_profile', {})
+                if lp.get('mode') == 'forward':
+                    start = lp.get('start', 0)
+                    end = lp.get('end', len(frame_list_cycle))
+                    if 0 <= start < end <= len(frame_list_cycle):
+                        print(f'[load_avatar] Forward loop activated: [{start}:{end}] ({end-start} frames, {lp.get("loop_seconds",0)}s) - Eliminating ping-pong reverse!')
+                        frame_list_cycle = frame_list_cycle[start:end]
+                        mask_list_cycle = mask_list_cycle[start:end]
+                        coord_list_cycle = coord_list_cycle[start:end]
+                        mask_coords_list_cycle = mask_coords_list_cycle[start:end]
+                        input_latent_list_cycle = input_latent_list_cycle[start:end]
+        except Exception as e:
+            print(f'[load_avatar] Notice: could not slice loop_profile: {e}')
+
+    # NextGen: pre-normalize masks once to float32 [0.0, 1.0] to eliminate per-frame cvtColor
+    mask_list_cycle = [
+        (cv2.cvtColor(m, cv2.COLOR_BGR2GRAY) if m.ndim == 3 else m).astype(np.float32) / 255.0
+        for m in mask_list_cycle
+    ]
     return frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle
 
 
@@ -224,7 +250,8 @@ def _build_graph_runner(model, batch_size, model_dtype):
     return runner, ok
 
 
-def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=16, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0, master_audio=None):
+def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size=48, face_enhance=False, audio_feature_offset_frames=0, audio_context_left=0, audio_conditioning_gain=1.0, master_audio=None, smooth_60fps=False, expressive_motion=False):
+    setup_torch_flags()
     vae, unet, pe, timesteps, audio_processor = model
     frame_list_cycle, mask_list_cycle, coord_list_cycle, mask_coords_list_cycle, input_latent_list_cycle = avatar_data
     wav_data, sr = sf.read(audio_path, dtype='float32')
@@ -316,14 +343,18 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     if not used_multi_gpu and cuda_graph_wanted:
         graph_runner, graph_ok = _build_graph_runner(model, batch_size, model_dtype)
 
-    # Optional GFPGAN face restoration (offline = no 25fps budget, safe to enable).
+    # GFPGAN disabled on lower-face patch (causes mouth darkening artifacts on partial crops)
     enhancer = None
     if face_enhance:
-        os.environ.setdefault("LIVETALKING_FACE_ENHANCE", "true")
-        from avatars import face_enhance as _fe
-        if _fe.is_enabled():
-            enhancer = _fe
-            print('[face_enhance] GFPGAN enabled (offline, no fps budget)')
+        print('[face_enhance] Notice: GFPGAN face restoration disabled for partial mouth crops to prevent black mouth distortion.')
+
+    motion_controller = None
+    prosody = None
+    if expressive_motion:
+        from avatars.expressive_motion import ExpressiveMotionController
+        motion_controller = ExpressiveMotionController(fps=fps, sample_rate=sr, device=device)
+        prosody = motion_controller.analyze_audio_prosody(wav_data, num_frames)
+        print('[expressive_motion] NextGen 6-DoF Audio Prosody Dynamics ENABLED (Spring-damper neck physics active)!')
 
     print('Preparing audio features per frame...')
     all_whisper_chunks = []
@@ -346,21 +377,36 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
             sel = sel * np.float32(audio_conditioning_gain)
         all_whisper_chunks.append(sel.reshape(-1, 384))  # [50, 384]
 
-    # ffmpeg rawvideo -> libx264 ultrafast pipe (replaces cv2.VideoWriter mp4v).
-    # mp4v is slow and soft; libx264 ultrafast is ~5x faster and sharper at CRF16.
+    # NextGen RTX 5090 Blackwell NVENC Hardware Acceleration
     temp_video_path = output_path.replace('.mp4', '_temp.mp4')
+    use_nvenc = os.getenv('LIVETALKING_USE_NVENC', 'true').strip().lower() not in ('0', 'false', 'no', 'off')
+    if use_nvenc and torch.cuda.is_available():
+        codec_args = [
+            '-pix_fmt', 'yuv420p', '-vcodec', 'h264_nvenc',
+            '-preset', os.getenv('LIVETALKING_NVENC_PRESET', 'p7'),
+            '-tune', 'hq',
+            '-b:v', os.getenv('LIVETALKING_NVENC_BITRATE', '14M'),
+            '-maxrate', '25M',
+            '-bufsize', '30M',
+        ]
+        print('[render_video] NextGen Blackwell NVENC active (h264_nvenc, preset=p7 HQ 14Mbps)')
+    else:
+        codec_args = [
+            '-pix_fmt', 'yuv420p', '-vcodec', 'libx264',
+            '-preset', os.getenv('LIVETALKING_OFFLINE_X264_PRESET', 'ultrafast'),
+            '-crf', os.getenv('LIVETALKING_OFFLINE_CRF', '16'),
+        ]
     ffmpeg_cmd = [
         'ffmpeg', '-y', '-an',
         '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
         '-s', f'{w}x{h}', '-r', str(fps), '-i', '-',
-        '-pix_fmt', 'yuv420p', '-vcodec', 'libx264',
-        '-preset', os.getenv('LIVETALKING_OFFLINE_X264_PRESET', 'ultrafast'),
-        '-crf', os.getenv('LIVETALKING_OFFLINE_CRF', '16'),
+    ] + codec_args + [
         '-movflags', '+faststart',
         temp_video_path,
     ]
     pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            bufsize=16*1024*1024)
 
     import time as _time
     render_start = _time.perf_counter()
@@ -371,7 +417,7 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
         for i in tqdm(range(0, num_frames, batch_size), desc='Rendering'):
             actual_batch = min(batch_size, num_frames - i)
             whisper_batch = np.stack([all_whisper_chunks[i+j] for j in range(actual_batch)])
-            latent_batch = torch.cat([input_latent_list_cycle[mirror_index(length, i+j)] for j in range(actual_batch)], dim=0)
+            latent_batch = torch.cat([input_latent_list_cycle[(i+j) % length] for j in range(actual_batch)], dim=0)
             audio_feature_batch = torch.from_numpy(whisper_batch).to(device=device, dtype=model_dtype)
             latent_batch = latent_batch.to(device=device, dtype=model_dtype)
 
@@ -392,8 +438,9 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
             pred = vae.decode_latents(pred_latents)
             if enhancer is not None:
                 pred = enhancer.enhance_faces(list(pred))
+            batch_frames = []
             for j in range(actual_batch):
-                idx = mirror_index(length, i+j)
+                idx = (i + j) % length
                 bbox = coord_list_cycle[idx]
                 x1, y1, x2, y2 = bbox
                 if x2 < x1: x1, x2 = x2, x1
@@ -401,12 +448,27 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
                 ori_frame = frame_list_cycle[idx].copy()
                 wj, hj = x2 - x1, y2 - y1
                 if wj <= 0 or hj <= 0 or x1 < 0 or y1 < 0:
-                    pipe.stdin.write(ori_frame.tobytes())
+                    batch_frames.append(ori_frame)
                     continue
-                res_frame = cv2.resize(pred[j].astype(np.uint8), (wj, hj))
+                interp = cv2.INTER_AREA if (pred[j].shape[1] >= wj and pred[j].shape[0] >= hj) else cv2.INTER_LANCZOS4
+                res_frame = cv2.resize(pred[j].astype(np.uint8), (wj, hj), interpolation=interp)
                 combine_frame = get_image_blending(ori_frame, res_frame, (x1, y1, x2, y2),
                                                    mask_list_cycle[idx], mask_coords_list_cycle[idx])
-                pipe.stdin.write(combine_frame.tobytes())
+                batch_frames.append(combine_frame)
+
+            if motion_controller is not None and prosody is not None:
+                # Apply 6-DoF GPU batch expressive warp (neck nod & gaze drift in FP16)
+                frames_np = np.stack(batch_frames, axis=0)
+                t_frames = torch.from_numpy(frames_np).permute(0, 3, 1, 2).to(device=device, dtype=torch.float16, non_blocking=True)
+                nods = [prosody['pitch_nod'][i+j] for j in range(actual_batch)]
+                drifts = [prosody['yaw_drift'][i+j] for j in range(actual_batch)]
+                tilts = [prosody['roll_tilt'][i+j] for j in range(actual_batch)]
+                ref_bbox = mask_coords_list_cycle[0]
+                warped_t = motion_controller.apply_batch_expressive_warp(t_frames, ref_bbox, nods, drifts, tilts)
+                batch_frames = list(warped_t.permute(0, 2, 3, 1).byte().cpu().numpy())
+
+            for f in batch_frames:
+                pipe.stdin.write(f.tobytes())
                 frames_done += 1
     finally:
         try:
@@ -424,12 +486,51 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     # audio_path (legacy behavior — final audio == 16 kHz conditioning).
     mux_audio = master_audio if master_audio else audio_path
     print('Muxing audio + video with ffmpeg...')
-    subprocess.run(['ffmpeg','-y','-i',temp_video_path,'-i',mux_audio,
-                    '-c:v','libx264','-preset','ultrafast','-c:a','aac','-b:a','192k',
-                    '-shortest','-movflags','+faststart',output_path],
-                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    os.remove(temp_video_path)
+    if smooth_60fps:
+        print('[smooth_60fps] Applying 60 FPS motion interpolation filter on RTX 5090...')
+        mux_cmd = [
+            'ffmpeg', '-y', '-i', temp_video_path, '-i', mux_audio,
+            '-vf', 'framerate=fps=60',
+            '-c:v', 'h264_nvenc' if use_nvenc else 'libx264',
+            '-preset', 'p7' if use_nvenc else 'ultrafast',
+            '-tune', 'hq' if use_nvenc else 'film',
+            '-b:v', '16M',
+            '-c:a', 'aac', '-b:a', '320k',
+            '-shortest', '-movflags', '+faststart', output_path
+        ]
+    elif use_nvenc:
+        # Instant lossless stream copy - 0.1s mux without CPU re-encode!
+        mux_cmd = [
+            'ffmpeg', '-y', '-i', temp_video_path, '-i', mux_audio,
+            '-c:v', 'copy',
+            '-c:a', 'aac', '-b:a', '320k',
+            '-shortest', '-movflags', '+faststart', output_path
+        ]
+    else:
+        mux_cmd = [
+            'ffmpeg', '-y', '-i', temp_video_path, '-i', mux_audio,
+            '-c:v', 'libx264', '-preset', 'ultrafast',
+            '-c:a', 'aac', '-b:a', '192k',
+            '-shortest', '-movflags', '+faststart', output_path
+        ]
+    subprocess.run(mux_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if os.path.exists(temp_video_path):
+        os.remove(temp_video_path)
     print(f'Done: {output_path}')
+
+    # NextGen Google Drive Auto-Sync
+    gdrive_dir = os.environ.get("LIVETALKING_GDRIVE_DIR", r"G:\My Drive\AI_Avatar_Outputs")
+    if os.path.isdir(gdrive_dir):
+        try:
+            import shutil
+            sub_folder = "NextGen_RTX5090_Demos" if "demo" in os.path.basename(output_path).lower() else "Studio_Renders"
+            target_dir = os.path.join(gdrive_dir, sub_folder)
+            os.makedirs(target_dir, exist_ok=True)
+            target_path = os.path.join(target_dir, os.path.basename(output_path))
+            shutil.copy2(output_path, target_path)
+            print(f"[Google Drive Sync] Da tu dong day video len Google Drive: {target_path}")
+        except Exception as e:
+            print(f"[Google Drive Sync] Bo qua dong bo Google Drive: {e}")
 
 
 def _print_banner(mode, truth, eff, avatar_id, audio_desc, output):
@@ -475,7 +576,9 @@ def main():
     parser.add_argument('--output', default=os.path.join('D:\\', 'CongThang_AI_Avatar', 'renders', 'output.mp4'))
     parser.add_argument('--voice', default='vi-VN-HoaiMyNeural',
                         help='EdgeTTS voice (convenience; NOT part of the render truth)')
-    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--batch_size', type=int, default=48, help='Batch size for UNet/VAE inference (NextGen RTX 5090 default 48)')
+    parser.add_argument('--smooth_60fps', action='store_true', help='NextGen 60 FPS cinema motion smoothing')
+    parser.add_argument('--expressive_motion', action='store_true', help='Audio-driven prosodic head nodding & gaze dynamics')
     parser.add_argument('--split_by', choices=['line','sentence','all'], default='sentence')
     parser.add_argument('--face_enhance', action='store_true',
                         help='Enable GFPGAN face restoration (needs models/GFPGANv1.4.pth)')
@@ -555,7 +658,9 @@ def main():
                      audio_feature_offset_frames=eff['audio_feature_offset_frames'],
                      audio_context_left=eff['audio_context_left'],
                      audio_conditioning_gain=eff['audio_conditioning_gain'],
-                     master_audio=master_audio)
+                     master_audio=master_audio,
+                     smooth_60fps=args.smooth_60fps,
+                     expressive_motion=args.expressive_motion)
 
     setup_torch_flags()
 

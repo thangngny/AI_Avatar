@@ -65,7 +65,7 @@ pretrained
 !studio/static/assets/avatar_source_example/sample.mp4
 workspace/log_ngp.txt
 .idea
-models/
+/models/
 *.log
 dist
 gfpgan/weights/

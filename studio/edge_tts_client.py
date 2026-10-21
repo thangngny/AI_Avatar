@@ -69,17 +69,20 @@ def is_available() -> bool:
 def _run_coro(coro):
     """Run an async coroutine in a fresh event loop (the studio controller is
     synchronous). Mirrors tts/edge.py._run_coro."""
-    loop = asyncio.new_event_loop()
     try:
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
-    finally:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
         try:
-            loop.run_until_complete(loop.shutdown_asyncgens())
-        except Exception:
-            pass
-        asyncio.set_event_loop(None)
-        loop.close()
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            asyncio.set_event_loop(None)
+            loop.close()
 
 
 async def _fetch_voices() -> List[Dict[str, Any]]:
@@ -135,35 +138,39 @@ def list_voices() -> Dict[str, Any]:
     return {"ok": True, "voices": voices, "default": DEFAULT_VOICE, "dynamic": True}
 
 
-async def _synthesize(voice: str, text: str, rate: str, pitch: str, volume: str, max_retries: int = 4) -> bytes:
+async def _synthesize(voice: str, text: str, rate: str, pitch: str, volume: str, max_retries: int = 5) -> bytes:
     """Synthesize text -> raw audio bytes (MP3 stream from Edge TTS) with retry."""
+    import tempfile, os
     last_err = None
     for attempt in range(1, max_retries + 1):
-        buf = io.BytesIO()
-        audio_bytes = 0
+        tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp3")
+        os.close(tmp_fd)
         try:
             communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch, volume=volume)
-            async for chunk in communicate.stream():
-                if chunk["type"] == "audio":
-                    data = chunk.get("data", b"")
-                    if data:
-                        buf.write(data)
-                        audio_bytes += len(data)
-            if audio_bytes > 0:
+            await communicate.save(tmp_path)
+            if os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 0:
+                with open(tmp_path, "rb") as f:
+                    data = f.read()
                 if attempt > 1:
                     logger.info("edge_tts recovered at attempt %d/%d for voice=%s", attempt, max_retries, voice)
-                return buf.getvalue()
-            last_err = f"Edge TTS returned no audio data for voice={voice}."
+                return data
+            last_err = f"Edge TTS returned 0 bytes for voice={voice}."
         except NoAudioReceived as e:
             last_err = f"Edge TTS returned no audio for voice={voice}."
         except EdgeTTSUnavailable:
             raise
         except Exception as e:
             last_err = f"Edge TTS error: {e}"
+        finally:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
 
         logger.warning("edge_tts attempt %d/%d failed for voice=%s: %s", attempt, max_retries, voice, last_err)
         if attempt < max_retries:
-            await asyncio.sleep(0.3 * attempt)
+            await asyncio.sleep(0.5 * attempt)
 
     raise EdgeTTSUnavailable(f"Edge TTS returned no audio for voice={voice}. ({last_err})")
 
