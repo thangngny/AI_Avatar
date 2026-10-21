@@ -33,8 +33,15 @@ SYNC_ROOTS = [
     "models",
     os.path.join("data", "avatars"),
     os.path.join("data", "input"),
+    os.path.join("gfpgan", "weights"),
+    os.path.join("avatars", "wav2lip"),
+    "input4_9",
     os.path.join("data", "avatar_sources.json"),
     os.path.join("data", "custom_config.json"),
+    os.path.join("data", "avatar_quality_audit.json"),
+    ".env",
+    os.path.join("data", "studio.db"),
+    os.path.join("data", "recordings"),
 ]
 
 def get_lan_ips():
