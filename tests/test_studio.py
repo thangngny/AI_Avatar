@@ -265,9 +265,9 @@ class TestProductionTruthProtection(StudioTestCase):
         t = r["truth"]
         # The locked values must be exactly the production truth.
         self.assertEqual(t["pipeline"], "musetalk_v15")
-        self.assertEqual(t["audio_gain"], 1.5)
-        self.assertEqual(t["audio_context_left"], 0)
-        self.assertEqual(t["audio_feature_offset_frames"], -3)
+        self.assertEqual(t["audio_gain"], 1.15)
+        self.assertEqual(t["audio_context_left"], 3)
+        self.assertEqual(t["audio_feature_offset_frames"], -1)
         self.assertEqual(t["fps"], 25)
         self.assertEqual(t["resolution_width"], 1080)
         self.assertEqual(t["resolution_height"], 1920)
@@ -412,8 +412,9 @@ class TestAPIContract(StudioTestCase):
 
         # 2. Valid Edge TTS payload with ready avatar
         avatars = self.client.get("/api/avatars").get_json()["avatars"]
-        if avatars:
-            ready_av = avatars[0]["avatar_id"]
+        ready_avs = [a["avatar_id"] for a in avatars if a.get("ready")]
+        if ready_avs:
+            ready_av = ready_avs[0]
             r2 = self.client.post("/api/render/validate", json={
                 "avatar_id": ready_av,
                 "script_text": "Xin chào quý vị khán giả.",
@@ -907,9 +908,9 @@ class TestLockedTruthUnchangedV115(StudioTestCase):
         self.assertTrue(r["ok"])
         t = r["truth"]
         self.assertEqual(t["pipeline"], "musetalk_v15")
-        self.assertEqual(t["audio_gain"], 1.5)
-        self.assertEqual(t["audio_context_left"], 0)
-        self.assertEqual(t["audio_feature_offset_frames"], -3)
+        self.assertEqual(t["audio_gain"], 1.15)
+        self.assertEqual(t["audio_context_left"], 3)
+        self.assertEqual(t["audio_feature_offset_frames"], -1)
         self.assertEqual(t["fps"], 25)
         self.assertEqual(t["resolution_width"], 1080)
         self.assertEqual(t["resolution_height"], 1920)

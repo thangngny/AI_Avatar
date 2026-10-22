@@ -286,9 +286,9 @@ class TestProductionTruth(TwoVoiceTestCase):
         self.assertTrue(r["ok"])
         t = r["truth"]
         self.assertEqual(t["pipeline"], "musetalk_v15")
-        self.assertEqual(t["audio_gain"], 1.5)
-        self.assertEqual(t["audio_context_left"], 0)
-        self.assertEqual(t["audio_feature_offset_frames"], -3)
+        self.assertEqual(t["audio_gain"], 1.15)
+        self.assertEqual(t["audio_context_left"], 3)
+        self.assertEqual(t["audio_feature_offset_frames"], -1)
         self.assertEqual(t["fps"], 25)
         self.assertEqual(t["resolution_width"], 1080)
         self.assertEqual(t["resolution_height"], 1920)

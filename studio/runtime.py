@@ -34,6 +34,8 @@ REPO_ROOT = os.path.dirname(HERE)  # C:\CongThang_AI_Avatar\AI_avatar
 # standalone env. This is the ONLY place the path is hardcoded.
 def _resolve_default_torch_python() -> str:
     candidates = [
+        os.path.normpath(os.path.join(REPO_ROOT, "..", "runtime_nextgen", "venv", "Scripts", "python.exe")),
+        r"C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe",
         r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
         r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
         os.path.normpath(os.path.join(REPO_ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),

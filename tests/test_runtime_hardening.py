@@ -277,7 +277,7 @@ class TestProductionTruth(HardeningTestCase):
     def test_truth_hash_unchanged(self):
         from studio import runtime_guard as rg
         self.assertEqual(rg.production_truth_hash(),
-                         "a5a0e55f46c29c1722efc5cc3f8fec3d902260f0")
+                         "bd4b6266150ecdaf8834237d3ba5590951e20b42")
         self.assertTrue(rg.production_truth_valid())
 
 

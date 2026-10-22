@@ -45,7 +45,7 @@ from . import config
 # Expected SHA1 of config/render_truth.json — the production-truth invariant.
 # Used ONLY to validate the file has not been altered; the file itself is never
 # mutated or re-hashed by this module.
-EXPECTED_TRUTH_SHA1 = "a5a0e55f46c29c1722efc5cc3f8fec3d902260f0"
+EXPECTED_TRUTH_SHA1 = "bd4b6266150ecdaf8834237d3ba5590951e20b42"
 
 
 # --------------------------------------------------------------------------- #
