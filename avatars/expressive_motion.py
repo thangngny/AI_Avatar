@@ -50,32 +50,36 @@ class ExpressiveMotionController:
         max_e = np.percentile(energy, 95) if len(energy) > 0 else 1.0
         energy_norm = np.clip(energy / max(max_e, 1e-5), 0.0, 1.0)
 
-        # 2. Physics-based Spring-Damper Smoothing (simulating human neck inertia)
+        # 2. SOTA Organic Prosody Filtering & Jerk-Limited Spring Physics
+        # Low-pass filter energy envelope to model human neck muscle response latency (~150ms)
+        from scipy.ndimage import gaussian_filter1d
+        smooth_energy = gaussian_filter1d(energy_norm, sigma=3.5)
+
         pitch_nod = np.zeros(num_frames, dtype=np.float32)
         yaw_drift = np.zeros(num_frames, dtype=np.float32)
         roll_tilt = np.zeros(num_frames, dtype=np.float32)
 
-        # Subtle natural parameters (in normalized coordinates [-1, 1])
-        # On a 1920x1080 frame, 4-6 pixels is ~0.004 to 0.006 normalized units
-        nod_amplitude = 0.0055   # ~5.5 pixels downward nod on stressed syllable
-        drift_amplitude = 0.0035 # ~3.5 pixels left/right gaze drift
-        tilt_amplitude = 0.8     # ~0.8 degrees subtle tilt
+        # Broadcast-calibrated micro-dynamics (in normalized coordinates [-1, 1])
+        # Eliminates jerkiness / twitching while preserving lively human presence
+        nod_amplitude = 0.0035   # ~3.5 pixels gentle nod on stressed syllable
+        drift_amplitude = 0.0022 # ~2.2 pixels subtle natural drift
+        tilt_amplitude = 0.5     # ~0.5 degrees elegant head tilt
 
         pos_nod, vel_nod = 0.0, 0.0
-        omega = 6.0   # Natural frequency (rad/s)
-        zeta = 0.85   # Damping ratio (critically damped)
+        omega = 4.0   # Natural frequency (rad/s) - gentle human tempo
+        zeta = 0.95   # Overdamped to eliminate any head ringing / bounce
         dt = 1.0 / self.fps
 
         for i in range(num_frames):
-            target_nod = energy_norm[i] * nod_amplitude
+            target_nod = smooth_energy[i] * nod_amplitude
             accel = -2.0 * zeta * omega * vel_nod - (omega ** 2) * (pos_nod - target_nod)
             vel_nod += accel * dt
             pos_nod += vel_nod * dt
             pitch_nod[i] = pos_nod
 
             t = i / self.fps
-            yaw_drift[i] = math.sin(t * 0.7) * drift_amplitude + math.sin(t * 1.3) * (drift_amplitude * 0.5)
-            roll_tilt[i] = math.cos(t * 0.5) * tilt_amplitude
+            yaw_drift[i] = math.sin(t * 0.6) * drift_amplitude + math.sin(t * 1.1) * (drift_amplitude * 0.4)
+            roll_tilt[i] = math.cos(t * 0.45) * tilt_amplitude
 
         return {
             "pitch_nod": pitch_nod,
@@ -124,17 +128,25 @@ class ExpressiveMotionController:
         B, C, H, W = frames_tensor.shape
         mask = self._get_head_mask(H, W, face_box)
 
-        # Build batch affine matrices [B, 2, 3] in normalized coordinates [-1, 1]
+        # SOTA Neck-Centered Pivot: Rotate around the avatar's real cervical spine joint
+        # This eliminates torso swing, neck shearing, and edge blur across boundaries.
+        x1, y1, x2, y2 = face_box
+        px = float(((x1 + x2) / 2.0) / ((W - 1) / 2.0) - 1.0)
+        py = float((y2 + (y2 - y1) * 0.20) / ((H - 1) / 2.0) - 1.0)
+
         thetas = []
         for b in range(B):
             ang = math.radians(tilts[b])
             cos_a = math.cos(ang)
             sin_a = math.sin(ang)
-            dx = drifts[b] * 2.0  # Normalized coordinate space is [-1, 1], width = 2
-            dy = nods[b] * 2.0    # Downward translation
+            dx = drifts[b] * 2.0  # Normalized coordinate space is [-1, 1]
+            dy = nods[b] * 2.0    # Downward nod
+            # Pivot-centered affine translation:
+            tx = px - cos_a * px + sin_a * py + dx
+            ty = py - sin_a * px - cos_a * py + dy
             theta = [
-                [cos_a, -sin_a, dx],
-                [sin_a,  cos_a, dy]
+                [cos_a, -sin_a, tx],
+                [sin_a,  cos_a, ty]
             ]
             thetas.append(theta)
 

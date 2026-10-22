@@ -123,12 +123,12 @@ def get_image_blending(image, face, face_box, mask_array, crop_box):
     face_large = _prepare_hybrid_generated(body[y_s:y_e, x_s:x_e], face_large, mask_image)
 
     # NextGen SOTA: Edge-preserving boundary feathering
-    # Protect inner mouth cavity & teeth from being softened by Gaussian blur
+    # Protect entire mouth aperture & lips (mask >= 0.50) from being softened by Gaussian blur
     soft_feather = _env_bool("LIVETALKING_SOFT_FEATHER", True)
     if soft_feather:
         blend_mask = cv2.GaussianBlur(mask_image, (7, 7), 2.0)
-        inner_mouth = mask_image >= 0.82
-        blend_mask[inner_mouth] = 1.0
+        lips_and_mouth = mask_image >= 0.50
+        blend_mask[lips_and_mouth] = 1.0
     else:
         blend_mask = mask_image
 

@@ -450,10 +450,12 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
                 if wj <= 0 or hj <= 0 or x1 < 0 or y1 < 0:
                     batch_frames.append(ori_frame)
                     continue
-                # SOTA Lanczos-4 Resampling + High-Frequency Crispness Injection
+                # SOTA Lanczos-4 Resampling + Bilateral Edge-Aware Crispness Injection
+                # Enhances high-contrast teeth/lip contours without amplifying skin noise
                 res_frame = cv2.resize(pred[j].astype(np.uint8), (wj, hj), interpolation=cv2.INTER_LANCZOS4)
-                blur_usm = cv2.GaussianBlur(res_frame, (0, 0), 1.2)
-                res_frame = np.clip(cv2.addWeighted(res_frame, 1.28, blur_usm, -0.28, 0), 0, 255).astype(np.uint8)
+                smooth_base = cv2.bilateralFilter(res_frame, d=5, sigmaColor=30, sigmaSpace=5)
+                detail = res_frame.astype(np.float32) - smooth_base.astype(np.float32)
+                res_frame = np.clip(res_frame.astype(np.float32) + detail * 0.35, 0, 255).astype(np.uint8)
                 combine_frame = get_image_blending(ori_frame, res_frame, (x1, y1, x2, y2),
                                                    mask_list_cycle[idx], mask_coords_list_cycle[idx])
                 batch_frames.append(combine_frame)
