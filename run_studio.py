@@ -75,6 +75,11 @@ def _startup_hardening(port: int) -> bool:
         print("  Runtime: %s" % (m.get("interpreter") or "?"))
         print("  Started: %s" % started_s)
         print("  No duplicate server spawned. Open http://127.0.0.1:%s/" % port)
+        try:
+            import webbrowser
+            webbrowser.open("http://127.0.0.1:%s/" % port)
+        except Exception:
+            pass
         return "already_running"
     if action == "unknown_owner":
         print("=" * 56)

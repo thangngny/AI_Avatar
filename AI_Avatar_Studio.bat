@@ -26,7 +26,12 @@ if not exist "%STUDIO_PY%" (
   exit /b 1
 )
 
-echo Starting AI Avatar Studio NextGen at http://%HOST%:%PORT% ...
+echo =====================================================================
+echo  AI AVATAR STUDIO NEXTGEN (RTX 5090 BLACKWELL EDITION)
+echo  URL: http://%HOST%:%PORT%/
+echo =====================================================================
+
+start "" http://%HOST%:%PORT%/
 "%STUDIO_PY%" run_studio.py --host %HOST% --port %PORT%
 
 endlocal
