@@ -105,3 +105,8 @@ handover/
 input4_9/
 
 dist_assets/
+
+# V2 Model Weights & Video Reports
+weights/
+reports/
+
