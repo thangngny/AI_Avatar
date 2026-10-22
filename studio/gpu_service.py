@@ -1,27 +1,27 @@
-"""GPU detection + job-level scheduling.
+"""GPU detection + job-level scheduling for NextGen RTX 5090.
 
-The workstation has 2 × RTX 3090 and has demonstrated successful JOB-LEVEL
-parallelism (one independent render process per GPU). We never split a single
-video across GPUs. This module detects available GPUs via nvidia-smi and
-tracks busy/free state so the render scheduler can assign queued jobs
-automatically. Normal users never choose a GPU.
+The workstation features an NVIDIA GeForce RTX 5090 with 32 GB GDDR7 VRAM.
+Each full-quality 1080p render stream requires ~15.5 GB VRAM.
+This module supports 2 concurrent execution slots on 32GB-class GPUs,
+allowing 2 videos to render simultaneously while automatically queuing any
+subsequent jobs until a slot frees up.
 """
 import os
 import re
 import subprocess
 import threading
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from . import config
 
 _LOCK = threading.Lock()
-_GPUS: List[Dict[str, Any]] = []   # [{id, name, memory_total_mib}]
-_BUSY: set = set()                  # gpu ids currently running a job
+_GPUS: List[Dict[str, Any]] = []        # [{id, name, memory_total_mib}]
+_BUSY_COUNTS: Dict[int, int] = {}       # gpu id -> count of actively running jobs
 
 
 def _query_gpus() -> List[Dict[str, Any]]:
     """Detect GPUs via nvidia-smi. Returns [] if unavailable (CPU-only / no
-    nvidia-smi). Memory is informative only — scheduling is by count, not VRAM."""
+    nvidia-smi)."""
     try:
         r = subprocess.run(
             ["nvidia-smi", "--query-gpu=index,name,memory.total",
@@ -55,9 +55,25 @@ def detect() -> List[Dict[str, Any]]:
         return list(_GPUS)
 
 
+def max_slots_for_gpu(gpu: Dict[str, Any]) -> int:
+    """Determine safe concurrent render slots for this GPU.
+    RTX 5090 (32GB GDDR7) can host 2 concurrent streams (~15.5GB each).
+    GPUs < 30GB host 1 stream. Overridable via STUDIO_SLOTS_PER_GPU."""
+    env_override = os.getenv("STUDIO_SLOTS_PER_GPU", "").strip()
+    if env_override.isdigit():
+        return max(1, int(env_override))
+    mem_mib = gpu.get("memory_total_mib", 0)
+    if mem_mib >= 30000:  # 32 GB class (e.g. RTX 5090)
+        return 2
+    return 1
+
+
 def available_count() -> int:
-    """Number of usable GPUs (job-level parallelism width)."""
-    return max(1, len(detect()))
+    """Number of usable concurrent job slots across all GPUs."""
+    gpus = detect()
+    if not gpus:
+        return 1
+    return sum(max_slots_for_gpu(g) for g in gpus)
 
 
 def status() -> List[Dict[str, Any]]:
@@ -65,33 +81,49 @@ def status() -> List[Dict[str, Any]]:
     gpus = detect()
     out = []
     with _LOCK:
-        busy = set(_BUSY)
+        counts = dict(_BUSY_COUNTS)
     for g in gpus:
-        out.append({"id": g["id"], "name": g["name"],
-                    "memory_total_mib": g["memory_total_mib"],
-                    "state": "BUSY" if g["id"] in busy else "READY"})
+        gid = g["id"]
+        slots = max_slots_for_gpu(g)
+        active = counts.get(gid, 0)
+        state = "READY" if active < slots else "BUSY"
+        out.append({
+            "id": gid,
+            "name": g["name"],
+            "memory_total_mib": g["memory_total_mib"],
+            "active_jobs": active,
+            "max_slots": slots,
+            "state": state
+        })
     return out
 
 
-def acquire() -> int:
-    """Acquire a free GPU for a job. Returns the gpu id, or None if all busy.
-    If no nvidia-smi GPUs are visible, returns 0 (CPU/fallback) so a single job
-    can still run sequentially."""
+def acquire() -> Optional[int]:
+    """Acquire an available GPU slot for a job.
+    Returns the gpu id (e.g. 0), or None if all slots on all GPUs are saturated."""
     gpus = detect()
     with _LOCK:
         if not gpus:
-            # Fallback single slot.
-            if 0 in _BUSY:
+            # Fallback single slot for CPU.
+            if _BUSY_COUNTS.get(0, 0) >= 1:
                 return None
-            _BUSY.add(0)
+            _BUSY_COUNTS[0] = _BUSY_COUNTS.get(0, 0) + 1
             return 0
+
         for g in gpus:
-            if g["id"] not in _BUSY:
-                _BUSY.add(g["id"])
-                return g["id"]
+            gid = g["id"]
+            slots = max_slots_for_gpu(g)
+            current_active = _BUSY_COUNTS.get(gid, 0)
+            if current_active < slots:
+                _BUSY_COUNTS[gid] = current_active + 1
+                return gid
         return None
 
 
 def release(gpu_id: int) -> None:
+    """Release an active slot on the specified GPU."""
     with _LOCK:
-        _BUSY.discard(gpu_id)
+        if gpu_id in _BUSY_COUNTS:
+            _BUSY_COUNTS[gpu_id] = max(0, _BUSY_COUNTS[gpu_id] - 1)
+            if _BUSY_COUNTS[gpu_id] == 0:
+                del _BUSY_COUNTS[gpu_id]
