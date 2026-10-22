@@ -489,26 +489,7 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
     mux_audio = master_audio if master_audio else audio_path
     print('Muxing audio + video with ffmpeg...')
     if smooth_60fps:
-        print('[smooth_60fps] Applying SOTA Neural Optical Flow 60 FPS interpolation on RTX 5090 (Zero Ghosting)...')
-        try:
-            from avatars.optical_flow_interpolator import interpolate_video_to_60fps
-            temp_25fps_mux = temp_video_path + ".mux25.mp4"
-            clean_mux_cmd = [
-                'ffmpeg', '-y', '-i', temp_video_path, '-i', mux_audio,
-                '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k',
-                '-shortest', temp_25fps_mux
-            ]
-            subprocess.run(clean_mux_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            flow_ok = interpolate_video_to_60fps(temp_25fps_mux, output_path, audio_path=mux_audio)
-            if os.path.isfile(temp_25fps_mux):
-                try: os.remove(temp_25fps_mux)
-                except Exception: pass
-            if flow_ok:
-                print(f'Render done with Neural Optical Flow 60 FPS: {output_path}')
-                return
-        except Exception as e:
-            print(f'[smooth_60fps] Optical flow fallback due to: {e}')
-        # Clean ghost-free 60fps fallback without frame blending
+        print('[smooth_60fps] Applying Crystal-Clean 60 FPS NVENC P7 HQ encoding on RTX 5090 (Zero Ghosting, Zero Noise)...')
         mux_cmd = [
             'ffmpeg', '-y', '-i', temp_video_path, '-i', mux_audio,
             '-vf', 'fps=fps=60',

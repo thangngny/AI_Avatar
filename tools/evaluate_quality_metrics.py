@@ -67,7 +67,7 @@ def main():
         ("demo_expressive_living_avatar_25fps.mp4", "25 FPS Baseline (Bilinear Resampling)"),
         ("demo_sota_crystal_sharp_25fps.mp4",       "25 FPS SOTA (Lanczos-4 + Edge-Preserving)"),
         ("demo_expressive_living_avatar_60fps.mp4", "60 FPS Baseline (FFmpeg framerate blend)"),
-        ("demo_sota_crystal_sharp_60fps.mp4",       "60 FPS SOTA (Neural Optical Flow Interpolation)")
+        ("demo_crystal_clean_60fps.mp4",          "60 FPS SOTA Crystal-Clean (Zero Noise NVENC P7)")
     ]
 
     print("=" * 80)
