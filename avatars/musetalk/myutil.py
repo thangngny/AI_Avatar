@@ -122,9 +122,15 @@ def get_image_blending(image, face, face_box, mask_array, crop_box):
 
     face_large = _prepare_hybrid_generated(body[y_s:y_e, x_s:x_e], face_large, mask_image)
 
-    # NextGen: Gaussian soft feathering for seamless skin/chin boundary
+    # NextGen SOTA: Edge-preserving boundary feathering
+    # Protect inner mouth cavity & teeth from being softened by Gaussian blur
     soft_feather = _env_bool("LIVETALKING_SOFT_FEATHER", True)
-    blend_mask = cv2.GaussianBlur(mask_image, (7, 7), 2.0) if soft_feather else mask_image
+    if soft_feather:
+        blend_mask = cv2.GaussianBlur(mask_image, (7, 7), 2.0)
+        inner_mouth = mask_image >= 0.82
+        blend_mask[inner_mouth] = 1.0
+    else:
+        blend_mask = mask_image
 
     body[y_s:y_e, x_s:x_e] = cv2.blendLinear(
         face_large, body[y_s:y_e, x_s:x_e], blend_mask, 1.0 - blend_mask
