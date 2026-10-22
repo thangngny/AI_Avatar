@@ -30,23 +30,47 @@ import argparse, json, os, sys
 import cv2
 import numpy as np
 
-FACE_CASCADE = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_alt2.xml"))
-FACE_CASCADE_DEF = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_frontalface_default.xml"))
-PROFILE_CASCADE = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_profileface.xml"))
-EYE_CASCADE = cv2.CascadeClassifier(os.path.join(cv2.data.haarcascades, "haarcascade_eye.xml"))
+def _load_cascade(filename):
+    try:
+        if hasattr(cv2, "CascadeClassifier") and hasattr(cv2, "data") and hasattr(cv2.data, "haarcascades"):
+            p = os.path.join(cv2.data.haarcascades, filename)
+            if os.path.isfile(p):
+                c = cv2.CascadeClassifier(p)
+                if hasattr(c, "empty") and not c.empty():
+                    return c
+    except Exception:
+        pass
+    return None
+
+FACE_CASCADE = _load_cascade("haarcascade_frontalface_alt2.xml")
+FACE_CASCADE_DEF = _load_cascade("haarcascade_frontalface_default.xml")
+PROFILE_CASCADE = _load_cascade("haarcascade_profileface.xml")
+EYE_CASCADE = _load_cascade("haarcascade_eye.xml")
 
 
 def detect_face(gray):
     for c in (FACE_CASCADE, FACE_CASCADE_DEF):
-        f = c.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60))
-        if len(f):
-            return sorted(f, key=lambda b: b[2] * b[3], reverse=True)[0]
-    p = PROFILE_CASCADE.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60))
-    if len(p):
-        return sorted(p, key=lambda b: b[2] * b[3], reverse=True)[0]
+        if c is not None:
+            try:
+                f = c.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60))
+                if len(f):
+                    return sorted(f, key=lambda b: b[2] * b[3], reverse=True)[0]
+            except Exception:
+                pass
+    if PROFILE_CASCADE is not None:
+        try:
+            p = PROFILE_CASCADE.detectMultiScale(gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60))
+            if len(p):
+                return sorted(p, key=lambda b: b[2] * b[3], reverse=True)[0]
+        except Exception:
+            pass
+    # Center-crop face proxy if cascade is unavailable or face not detected in portrait framing
+    h, w = gray.shape[:2]
+    if h > 100 and w > 100:
+        fw, fh = int(w * 0.4), int(h * 0.35)
+        fx, fy = int((w - fw) / 2), int(h * 0.15)
+        return (fx, fy, fw, fh)
     return None
-
-
 def laplacian_var(img):
     return float(cv2.Laplacian(img, cv2.CV_64F).var())
 
@@ -87,8 +111,7 @@ def analyze(path, n=8):
             aspect = w / float(h)
             r["aspect"] = aspect
             # frontal proxy: aspect near 0.78 and both eyes detected in upper face
-            eyes = EYE_CASCADE.detectMultiScale(gray[y:y + int(h * 0.55), x:x + w], scaleFactor=1.1,
-                                                minNeighbors=6, minSize=(int(w * 0.08), int(w * 0.08)))
+            eyes = EYE_CASCADE.detectMultiScale(gray[y:y + int(h * 0.55), x:x + w], scaleFactor=1.1, minNeighbors=6, minSize=(int(w * 0.08), int(w * 0.08))) if EYE_CASCADE is not None else []
             r["eyes"] = len(eyes)
             r["yaw_est"] = max(0.0, (0.78 - aspect) / 0.28) * 70.0
             # mouth region (lower third of face)
