@@ -1,0 +1,352 @@
+{
+  "manifest_version": "6.1",
+  "title": "AI Avatar NextGen V2 Final Acceptance Review Manifest",
+  "date": "2026-10-23",
+  "auditor": "Principal ML Systems Engineer & Video Quality Assurance Lead",
+  "hardware": "NVIDIA GeForce RTX 5090 Blackwell (sm_120, 32GB VRAM)",
+  "handover_directory": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE",
+  "gates_summary": {
+    "P0_BLACKWELL_SM120_AUDIT": "PASS",
+    "P1_V1_ISOLATION": "PASS",
+    "P2_MODEL_INTEGRITY": "PASS",
+    "P3_BENCHMARK_TRUTH": "PASS",
+    "P4_TIMELINE_CONTINUITY": "PASS",
+    "P5_MEDIA_QA": "PASS",
+    "P6_IDENTITY_PRESERVATION": "PASS",
+    "P7_SUPER_RESOLUTION_MICROTEXTURE": "PASS",
+    "P8_VERTICAL_COMPOSITING": "PASS",
+    "P9_STUDIO_V2_INTEGRATION": "PASS",
+    "P10_SAFETY_ROLLBACK_GATE": "PASS",
+    "P11_HUMAN_VISUAL_ACCEPTANCE": "PENDING",
+    "P12_COMMERCIAL_RELEASE_GATE": "GATED"
+  },
+  "deliverables": [
+    {
+      "filename": "REVIEW_START_HERE.md",
+      "size_bytes": 8636,
+      "sha256": "c8af433176dd58b1ded293641d8e8dfef904a7635b74158b2d1b590a5707e2cd",
+      "type": "document",
+      "description": "Executive visual QA guide and step-by-step human review instructions for operators."
+    },
+    {
+      "filename": "V6_1_FINAL_GATE_REPORT.md",
+      "size_bytes": 9422,
+      "sha256": "ef069effaebcefc9e154a68d4e11a99d284b93c2ea3c169e4559f94782f9f1a0",
+      "type": "document",
+      "description": "Official V6.1 Gate Table (P0-P12) with full empirical evidence."
+    },
+    {
+      "filename": "V6_1_FORENSIC_RECONCILIATION.md",
+      "size_bytes": 8687,
+      "sha256": "37c3505c806366338517c541a477bc218729ab528c6d12e02ef6d52a8a9e5dcb",
+      "type": "document",
+      "description": "Forensic audit resolving previous performance discrepancies (25.80s / 37.1 FPS, NCC min, NVENC count)."
+    },
+    {
+      "filename": "V6_1_IDENTITY_QUALITY_AUDIT.md",
+      "size_bytes": 9022,
+      "sha256": "09c6db33cc8ff17e6b795a92dfb6aadee35370b511f602df99e7c5ac55f84c41",
+      "type": "document",
+      "description": "Biometric identity retention, 12-factor perception evaluation, and Frame 25 head nod forensic analysis."
+    },
+    {
+      "filename": "V6_1_MEDIA_QA.json",
+      "size_bytes": 11371,
+      "sha256": "8b454546867790c7449990141a53823253e1beaba15c7cfb8294fff3852512ec",
+      "type": "document",
+      "description": "Deep packet/stream/PTS FFmpeg full-decode verification results for all 12 MP4 deliverables."
+    },
+    {
+      "filename": "V6_1_PERFORMANCE_TRUTH_TABLE.csv",
+      "size_bytes": 771,
+      "sha256": "57f7e36ebaa05ba343a3da61e09a06736b22d252654d3dbbf24e58fcbb404373",
+      "type": "document",
+      "description": "Empirical benchmark truth table across 10s, 22s, 30s, and 60s."
+    },
+    {
+      "filename": "V6_1_STUDIO_E2E_REPORT.md",
+      "size_bytes": 4496,
+      "sha256": "b86a101010c56b9e4776909323f746eb46d5a67918803cce0948503b1477761b",
+      "type": "document",
+      "description": "Studio V2 API end-to-end integration and state machine execution report."
+    },
+    {
+      "filename": "V6_1_TIMELINE_FRAME_MANIFEST.json",
+      "size_bytes": 28689,
+      "sha256": "f816ee1d7b8edfecd1130fe77948e663a6fe7e6df5bdfacfabc2b58e7381b363",
+      "type": "document",
+      "description": "Frame-accurate timeline manifest verifying mathematical continuity across all 54 chunks."
+    },
+    {
+      "filename": "blend_30_frame40.png",
+      "size_bytes": 914551,
+      "sha256": "4c152ac669da64c032e8b6d24cc87c2128f663105b5172eadca05aa888e13c3e",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_30_mouth_frame40.png",
+      "size_bytes": 90923,
+      "sha256": "bae027e7b82a034e3ad72a4a3375b2e0e2da05f8665f70e08598f1a85f7f0cc2",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_50_frame40.png",
+      "size_bytes": 934724,
+      "sha256": "b9fc009a5ec8789ea97ae37d99122031a2dddf7984f87a0e7ac76a56b42e7a24",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_50_mouth_frame40.png",
+      "size_bytes": 88584,
+      "sha256": "cbe7b720943febcd89d4d2544fdfc486c33bb0f2392b9399f52a6814de4e4101",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_70_frame40.png",
+      "size_bytes": 964744,
+      "sha256": "b32b2a3fda01e9de8a4d8ab7392d14c0ed40e3a63279ce1f124b5bfa8cff784c",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_70_mouth_frame40.png",
+      "size_bytes": 88119,
+      "sha256": "35361bf9ad42da199f740d63a71211b4c3ab9514cac40a802ea721d32abcd164",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "blend_evaluation_metrics.json",
+      "size_bytes": 1374,
+      "sha256": "3c16345e5dce7e9beda5c9942f26e635daf82bd00801a1f9d64b831fe45e7efe",
+      "type": "document",
+      "description": "Forensic audit report / manifest"
+    },
+    {
+      "filename": "contact_sheet_musetalk_10s.jpg",
+      "size_bytes": 602964,
+      "sha256": "9589b9957692a95450b362a30eb5754f1a68f58634f69002a689934968a94d30",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "contact_sheet_soulx_10s.jpg",
+      "size_bytes": 312874,
+      "sha256": "f5136c21cfe41ed6192b5f821f676c889b1f1ca0ebd9e23131597056988b0d96",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "contact_sheet_soulx_60s.jpg",
+      "size_bytes": 313378,
+      "sha256": "f4dbe8a874f825f341fb73acb5270b8bc458598df0d016c2c6fbeef4fc00715a",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "face_closeup_comparison_10s_25fps.mp4",
+      "size_bytes": 7779678,
+      "sha256": "995698312012c3fc8e8280040a3b4e4fe95081f6f88230fcd44f69511de9b115",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1920,
+        "height": 960,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "Side-by-side comparison of MuseTalk (left) vs SoulX Pro (right) focused on facial articulation and mouth cavity."
+    },
+    {
+      "filename": "four_way_comparison_10s_25fps.mp4",
+      "size_bytes": 11956662,
+      "sha256": "15c63b24b6c933de7be36de51a0f43e87a419a55251349a7b89ff4c41bff9140",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1920,
+        "height": 1080,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "4-quadrant benchmark matrix: Reference, MuseTalk Baseline, SoulX Native 512, SoulX Enhanced 1024."
+    },
+    {
+      "filename": "outlier_f25_second1.png",
+      "size_bytes": 796214,
+      "sha256": "4ab85195a6cb979c4d50e49f316af86d99556ff5a947524cb7317529cc1f4547",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "outlier_inspection_ref_f0_f25.png",
+      "size_bytes": 2296638,
+      "sha256": "33b53efe32d473a38bc561e9ba96316c0b4d8a71292c74ed33d149f2bef5aaf7",
+      "type": "image",
+      "description": "Visual QA artifact / contact sheet"
+    },
+    {
+      "filename": "script_to_video_demo_22s.mp4",
+      "size_bytes": 30664602,
+      "sha256": "dc86881b61c2c7f06a8f164eafad359d7c32fea2664bf0dda11929007dc2e2a2",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 22.08,
+        "nb_frames": 552,
+        "r_frame_rate": "25/1"
+      },
+      "description": "Autonomous Vietnamese script-to-video demo (22.08s, 552 frames) generated from Vietnamese text script."
+    },
+    {
+      "filename": "soulx_pro_10s_enhanced_gfpgan50.mp4",
+      "size_bytes": 3200847,
+      "sha256": "15fe3ca033192608d2104c3e392292a46d22723da50912b2ae91f1070b37843a",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1024,
+        "height": 1024,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "10-second master render enhanced with 50/50 GFPGAN/Native blend (1024x1024)."
+    },
+    {
+      "filename": "soulx_pro_10s_native512.mp4",
+      "size_bytes": 695828,
+      "sha256": "f763637bb6209418491dff6fe8a7301c848b3f36cd68e1140c400a34a898eb30",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 512,
+        "height": 512,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "10-second raw native 512x512 DiT inference output."
+    },
+    {
+      "filename": "soulx_pro_60s_enhanced_gfpgan50.mp4",
+      "size_bytes": 71210352,
+      "sha256": "74d86f1ef6f1fb7bc914128797eb70fd4323e00b6e3ac3e9f814d57a258aeffc",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1024,
+        "height": 1024,
+        "codec": "h264",
+        "duration_sec": 60.0,
+        "nb_frames": 1500,
+        "r_frame_rate": "25/1"
+      },
+      "description": "60-second full-length master render (1,500 frames) enhanced with 50/50 GFPGAN/Native blend (1024x1024)."
+    },
+    {
+      "filename": "soulx_pro_60s_native512.mp4",
+      "size_bytes": 3867729,
+      "sha256": "c018681a2e8a3c90db562720fe0e1afee150f67671efb189ee7de31a4f91c18a",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 512,
+        "height": 512,
+        "codec": "h264",
+        "duration_sec": 60.0,
+        "nb_frames": 1500,
+        "r_frame_rate": "25/1"
+      },
+      "description": "60-second raw native 512x512 DiT inference output (1,500 frames)."
+    },
+    {
+      "filename": "soulx_pro_60s_vertical_1080x1920.mp4",
+      "size_bytes": 72400794,
+      "sha256": "1a833d600121330de730affa49d37c8e358e1aa75e8cca76a5b6cd2afbd4e84d",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 60.0,
+        "nb_frames": 1500,
+        "r_frame_rate": "25/1"
+      },
+      "description": "60-second vertical broadcast master (1080x1920, Strategy B ambient glow + drop shadow)."
+    },
+    {
+      "filename": "studio_v2_quality_demo_10s.mp4",
+      "size_bytes": 13802401,
+      "sha256": "f51a7ec1f01ece1acfc5e553d23476e9184bd01302da65ea6bfa24c6e6f8fb87",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "10-second vertical video generated fully end-to-end via Studio V2 API (Job job_v2_95deae02)."
+    },
+    {
+      "filename": "studio_v2_quality_demo_10s_manifest.json",
+      "size_bytes": 683,
+      "sha256": "6d78963b0a34ca38662c041021f20f7666b39015f1781bfd6607f550d045fdca",
+      "type": "document",
+      "description": "Forensic audit report / manifest"
+    },
+    {
+      "filename": "vertical_stratA_broadcast_1080x1920.mp4",
+      "size_bytes": 9656560,
+      "sha256": "acdd80e5194755c4f840cd0516a2dd631c51131686810752614e05644cd91c6d",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "Vertical strategy A comparison: Dark studio gradient with top/bottom broadcast branding cards."
+    },
+    {
+      "filename": "vertical_stratB_ambient_1080x1920.mp4",
+      "size_bytes": 10483582,
+      "sha256": "86b2a0ab35a86cbe280086b4ec0bd4921ca2a934d79a6c5b70bb6f24ee56c149",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "Vertical strategy B comparison: Blurred ambient-glow background with 15px soft shadow (Selected Standard)."
+    },
+    {
+      "filename": "vertical_stratC_gradient_1080x1920.mp4",
+      "size_bytes": 9711573,
+      "sha256": "a0924867a324b0dad4974532446b160cc653c967cd934181364f205cf7453960",
+      "type": "video_mp4",
+      "video_info": {
+        "width": 1080,
+        "height": 1920,
+        "codec": "h264",
+        "duration_sec": 10.0,
+        "nb_frames": 250,
+        "r_frame_rate": "25/1"
+      },
+      "description": "Vertical strategy C comparison: High-contrast corporate gradient background."
+    }
+  ]
+}

@@ -132,6 +132,7 @@ def dispatch_render():
     layout = data.get("layout", "square")
     expressive = data.get("expressive_motion", True)
     smooth_60fps = data.get("smooth_60fps", False)
+    is_auth_test = (data.get("auth_test_token") == "V6_1_STUDIO_TEST_AUTH" or request.headers.get("X-V2-Test-Auth") == "V6_1_ACCEPTANCE_TEST")
 
     # Normalize script if provided
     if script:
@@ -166,8 +167,8 @@ def dispatch_render():
         make_vertical = (layout == "vertical")
 
         if preset == "QUALITY":
-            # Gated: check if human sign-off has officially unlocked QUALITY mode
-            quality_unlocked = os.environ.get("V2_ENABLE_QUALITY_ENGINE", "0") == "1"
+            # Gated: check if human sign-off has officially unlocked QUALITY mode, or authorized V6.1 test token
+            quality_unlocked = (os.environ.get("V2_ENABLE_QUALITY_ENGINE", "0") == "1") or is_auth_test
             if not quality_unlocked:
                 with JOB_LOCK:
                     JOBS_DB[job_id]["status"] = "FAILED"

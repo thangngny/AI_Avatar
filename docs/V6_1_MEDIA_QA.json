@@ -1,0 +1,365 @@
+{
+  "face_closeup_comparison_10s_25fps.mp4": {
+    "filename": "face_closeup_comparison_10s_25fps.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\face_closeup_comparison_10s_25fps.mp4",
+    "file_size_bytes": 7779678,
+    "sha256": "995698312012c3fc8e8280040a3b4e4fe95081f6f88230fcd44f69511de9b115",
+    "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 960,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.88
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 6223742
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "four_way_comparison_10s_25fps.mp4": {
+    "filename": "four_way_comparison_10s_25fps.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\four_way_comparison_10s_25fps.mp4",
+    "file_size_bytes": 11956662,
+    "sha256": "15c63b24b6c933de7be36de51a0f43e87a419a55251349a7b89ff4c41bff9140",
+    "video": {
+      "codec": "h264",
+      "width": 1920,
+      "height": 1080,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.92
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 9565329
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "script_to_video_demo_22s.mp4": {
+    "filename": "script_to_video_demo_22s.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\script_to_video_demo_22s.mp4",
+    "file_size_bytes": 30664602,
+    "sha256": "dc86881b61c2c7f06a8f164eafad359d7c32fea2664bf0dda11929007dc2e2a2",
+    "video": {
+      "codec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 552,
+      "stream_duration_sec": 22.08,
+      "first_pts_sec": 0.063984,
+      "last_pts_sec": 22.103984
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 22.128
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 22.143984,
+      "bitrate_bps": 11078260
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "soulx_pro_10s_enhanced_gfpgan50.mp4": {
+    "filename": "soulx_pro_10s_enhanced_gfpgan50.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\soulx_pro_10s_enhanced_gfpgan50.mp4",
+    "file_size_bytes": 3200847,
+    "sha256": "15fe3ca033192608d2104c3e392292a46d22723da50912b2ae91f1070b37843a",
+    "video": {
+      "codec": "h264",
+      "width": 1024,
+      "height": 1024,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.88
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 2560677
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "soulx_pro_10s_native512.mp4": {
+    "filename": "soulx_pro_10s_native512.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\soulx_pro_10s_native512.mp4",
+    "file_size_bytes": 695828,
+    "sha256": "f763637bb6209418491dff6fe8a7301c848b3f36cd68e1140c400a34a898eb30",
+    "video": {
+      "codec": "h264",
+      "width": 512,
+      "height": 512,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.96
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 556662
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "soulx_pro_60s_enhanced_gfpgan50.mp4": {
+    "filename": "soulx_pro_60s_enhanced_gfpgan50.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\soulx_pro_60s_enhanced_gfpgan50.mp4",
+    "file_size_bytes": 71210352,
+    "sha256": "74d86f1ef6f1fb7bc914128797eb70fd4323e00b6e3ac3e9f814d57a258aeffc",
+    "video": {
+      "codec": "h264",
+      "width": 1024,
+      "height": 1024,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 1500,
+      "stream_duration_sec": 60.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 59.96
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 60.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 60.0,
+      "bitrate_bps": 9494713
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "soulx_pro_60s_native512.mp4": {
+    "filename": "soulx_pro_60s_native512.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\soulx_pro_60s_native512.mp4",
+    "file_size_bytes": 3867729,
+    "sha256": "c018681a2e8a3c90db562720fe0e1afee150f67671efb189ee7de31a4f91c18a",
+    "video": {
+      "codec": "h264",
+      "width": 512,
+      "height": 512,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 1500,
+      "stream_duration_sec": 60.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 59.96
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 60.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 60.0,
+      "bitrate_bps": 515697
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "soulx_pro_60s_vertical_1080x1920.mp4": {
+    "filename": "soulx_pro_60s_vertical_1080x1920.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\soulx_pro_60s_vertical_1080x1920.mp4",
+    "file_size_bytes": 72400794,
+    "sha256": "1a833d600121330de730affa49d37c8e358e1aa75e8cca76a5b6cd2afbd4e84d",
+    "video": {
+      "codec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 1500,
+      "stream_duration_sec": 60.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 59.92
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 60.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 60.0,
+      "bitrate_bps": 9653439
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "vertical_stratA_broadcast_1080x1920.mp4": {
+    "filename": "vertical_stratA_broadcast_1080x1920.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\vertical_stratA_broadcast_1080x1920.mp4",
+    "file_size_bytes": 9656560,
+    "sha256": "acdd80e5194755c4f840cd0516a2dd631c51131686810752614e05644cd91c6d",
+    "video": {
+      "codec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.96
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 7725248
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "vertical_stratB_ambient_1080x1920.mp4": {
+    "filename": "vertical_stratB_ambient_1080x1920.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\vertical_stratB_ambient_1080x1920.mp4",
+    "file_size_bytes": 10483582,
+    "sha256": "86b2a0ab35a86cbe280086b4ec0bd4921ca2a934d79a6c5b70bb6f24ee56c149",
+    "video": {
+      "codec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.88
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 8386865
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  },
+  "vertical_stratC_gradient_1080x1920.mp4": {
+    "filename": "vertical_stratC_gradient_1080x1920.mp4",
+    "absolute_path": "D:\\CongThang_AI_Avatar\\v2_renders\\V6_FINAL_ACCEPTANCE\\vertical_stratC_gradient_1080x1920.mp4",
+    "file_size_bytes": 9711573,
+    "sha256": "a0924867a324b0dad4974532446b160cc653c967cd934181364f205cf7453960",
+    "video": {
+      "codec": "h264",
+      "width": 1080,
+      "height": 1920,
+      "nominal_fps": "25/1",
+      "avg_fps": "25/1",
+      "time_base": "1/12800",
+      "pixel_format": "yuv420p",
+      "decoded_frames": 250,
+      "stream_duration_sec": 10.0,
+      "first_pts_sec": 0.0,
+      "last_pts_sec": 9.96
+    },
+    "audio": {
+      "codec": "aac",
+      "sample_rate": 16000,
+      "channels": 1,
+      "stream_duration_sec": 10.0
+    },
+    "container": {
+      "format_name": "mov,mp4,m4a,3gp,3g2,mj2",
+      "duration_sec": 10.0,
+      "bitrate_bps": 7769258
+    },
+    "full_decode_exit_code": 0,
+    "decode_intact": true,
+    "decode_stderr": null
+  }
+}
