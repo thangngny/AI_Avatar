@@ -5,6 +5,8 @@ Tier 2 'QUALITY' Engine Backend Adapter for AI Avatar Studio V2.
 import os
 import sys
 import time
+import json
+import hashlib
 import subprocess
 import cv2
 import torch
@@ -207,10 +209,46 @@ class QualityVideoGenerator:
         t_end = time.perf_counter()
         dur = total_frames / fps if fps > 0 else 0.0
 
+        # Generate atomic timeline manifest & checksum
+        sha256_hash = hashlib.sha256()
+        try:
+            with open(final_output_path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    sha256_hash.update(chunk)
+            file_sha256 = sha256_hash.hexdigest()
+        except Exception:
+            file_sha256 = "N/A"
+
+        manifest_data = {
+            "job_id": job_id,
+            "avatar_id": avatar_id,
+            "engine": "QUALITY (SoulX-FlashHead Pro 1.3B + GFPGAN 50/50 + NVENC Master)",
+            "output_path": final_output_path,
+            "output_sha256": file_sha256,
+            "file_size_bytes": os.path.getsize(final_output_path) if os.path.exists(final_output_path) else 0,
+            "duration_sec": round(dur, 2),
+            "fps": fps,
+            "total_frames_retained": total_frames,
+            "canvas_layout": "vertical_9_16" if make_vertical else "square_1_1",
+            "wall_clock_sec": round(t_end - t_start, 2),
+            "effective_fps": round(total_frames / (t_end - t_start), 1) if (t_end - t_start) > 0 else 0.0,
+            "master_audio_path": master_audio_path,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        manifest_path = final_output_path.replace(".mp4", "_manifest.json")
+        try:
+            with open(manifest_path, "w", encoding="utf-8") as f:
+                json.dump(manifest_data, f, indent=2)
+        except Exception:
+            pass
+
         return {
             "success": True,
             "engine": "QUALITY (SoulX-FlashHead Pro 1.3B + GFPGAN 50/50)",
             "output_path": final_output_path,
+            "manifest_path": manifest_path,
+            "output_sha256": file_sha256,
             "duration_sec": round(dur, 2),
             "wall_clock_sec": round(t_end - t_start, 2),
             "net_fps": round(total_frames / (t_end - t_start), 1) if (t_end - t_start) > 0 else 0.0,

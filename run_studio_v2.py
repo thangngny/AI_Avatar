@@ -22,6 +22,7 @@ sys.path.insert(0, REPO_ROOT)
 
 from engines.musetalk_engine import MuseTalkEngine
 from audio.performance_director import PerformanceDirector
+from audio.vietnamese_text_normalizer import VietnameseTextNormalizer
 from core.long_video_generator import LongVideoGenerator
 from core.quality_video_generator import QualityVideoGenerator
 from quality.qc_gate import QualityControlGate
@@ -34,6 +35,7 @@ os.makedirs(V2_RENDERS_DIR, exist_ok=True)
 # State
 ENGINE = MuseTalkEngine(repo_root=REPO_ROOT)
 DIRECTOR = PerformanceDirector()
+NORMALIZER = VietnameseTextNormalizer()
 GENERATOR = LongVideoGenerator(output_root=V2_RENDERS_DIR)
 QUALITY_GENERATOR = QualityVideoGenerator(output_root=V2_RENDERS_DIR)
 QC_GATE = QualityControlGate()
@@ -109,6 +111,17 @@ def preview_script():
     })
 
 
+@app.route("/api/preview/normalize", methods=["POST"])
+def normalize_text():
+    data = request.json or {}
+    script = data.get("script", "")
+    normalized = NORMALIZER.normalize(script)
+    return jsonify({
+        "original": script,
+        "normalized": normalized
+    })
+
+
 @app.route("/api/render", methods=["POST"])
 def dispatch_render():
     data = request.json or {}
@@ -116,8 +129,13 @@ def dispatch_render():
     audio_path = data.get("audio_path")
     script = data.get("script")
     preset = data.get("preset", "FAST")
+    layout = data.get("layout", "square")
     expressive = data.get("expressive_motion", True)
     smooth_60fps = data.get("smooth_60fps", False)
+
+    # Normalize script if provided
+    if script:
+        script = NORMALIZER.normalize(script)
 
     job_id = f"job_v2_{uuid.uuid4().hex[:8]}"
 
@@ -133,6 +151,7 @@ def dispatch_render():
             "job_id": job_id,
             "avatar_id": avatar_id,
             "preset": preset,
+            "layout": layout,
             "status": "QUEUED",
             "progress": 0.0,
             "created_at": time.time(),
@@ -141,8 +160,10 @@ def dispatch_render():
 
     def render_worker():
         with JOB_LOCK:
-            JOBS_DB[job_id]["status"] = "RENDERING"
-            JOBS_DB[job_id]["progress"] = 0.15
+            JOBS_DB[job_id]["status"] = "VALIDATING"
+            JOBS_DB[job_id]["progress"] = 0.05
+
+        make_vertical = (layout == "vertical")
 
         if preset == "QUALITY":
             # Gated: check if human sign-off has officially unlocked QUALITY mode
@@ -156,8 +177,18 @@ def dispatch_render():
                     )
                 return
 
+            with JOB_LOCK:
+                JOBS_DB[job_id]["status"] = "MODEL_LOADING"
+                JOBS_DB[job_id]["progress"] = 0.15
+
             def on_progress(p):
                 with JOB_LOCK:
+                    if p < 0.70:
+                        JOBS_DB[job_id]["status"] = "GENERATING"
+                    elif p < 0.90:
+                        JOBS_DB[job_id]["status"] = "ENHANCING"
+                    else:
+                        JOBS_DB[job_id]["status"] = "COMPOSITING"
                     JOBS_DB[job_id]["progress"] = p
 
             res = QUALITY_GENERATOR.render_quality_video(
@@ -165,10 +196,14 @@ def dispatch_render():
                 avatar_id=avatar_id,
                 master_audio_path=audio_path,
                 final_output_path=output_path,
-                make_vertical=smooth_60fps,
+                make_vertical=make_vertical,
                 progress_callback=on_progress
             )
         else:
+            with JOB_LOCK:
+                JOBS_DB[job_id]["status"] = "GENERATING"
+                JOBS_DB[job_id]["progress"] = 0.20
+
             res = GENERATOR.render_long_video(
                 job_id=job_id,
                 avatar_id=avatar_id,
@@ -180,6 +215,8 @@ def dispatch_render():
 
         with JOB_LOCK:
             if res.get("success"):
+                JOBS_DB[job_id]["status"] = "TECHNICAL_QA"
+                JOBS_DB[job_id]["progress"] = 0.95
                 qc = QC_GATE.verify_video(output_path, audio_path)
                 JOBS_DB[job_id]["status"] = "COMPLETED"
                 JOBS_DB[job_id]["progress"] = 1.0
@@ -283,9 +320,19 @@ HTML_TEMPLATE = """
       <label>KỊCH BẢN TIẾNG VIỆT</label>
       <textarea id="scriptText" placeholder="Nhập kịch bản phát thanh hoặc quảng cáo tiếng Việt...">Chào mừng quý vị đã quay trở lại với AI Avatar NextGen V2! Hôm nay chúng tôi rất vinh dự được giới thiệu phiên bản mới với chất lượng chuyển động khuôn mặt và khẩu hình tự nhiên vượt bậc.</textarea>
 
-      <button type="button" class="btn" style="background: #374151; margin-bottom: 16px; font-size: 13px; padding: 8px;" onclick="analyzeScript()">Phân tích cảm xúc & Ngắt câu (Performance Director)</button>
+      <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+        <button type="button" class="btn" style="background: #374151; font-size: 13px; padding: 8px; flex: 1;" onclick="normalizeScript()">✨ Chuẩn hóa tiếng Việt (Số, Ngày, Viết tắt)</button>
+        <button type="button" class="btn" style="background: #1f2937; font-size: 13px; padding: 8px; flex: 1;" onclick="analyzeScript()">🎭 Phân tích cảm xúc & Ngắt câu</button>
+      </div>
 
-      <div class="plan-box" id="planBox" style="display: none;"></div>
+      <div class="plan-box" id="normBox" style="display: none; background: #111827; border-left: 3px solid #10b981; margin-bottom: 12px;"></div>
+      <div class="plan-box" id="planBox" style="display: none; margin-bottom: 12px;"></div>
+
+      <label>ĐỊNH DẠNG KHUNG HÌNH (CANVAS LAYOUT)</label>
+      <select id="layoutSelect">
+        <option value="square">1:1 Vuông Master (1024×1024 — Tối ưu chi tiết khuôn mặt)</option>
+        <option value="vertical">9:16 Full-HD Dọc (1080×1920 — Dynamic Ambient Wings cho TikTok/Shorts)</option>
+      </select>
 
       <label>CHẾ ĐỘ KẾT XUẤT (RENDER PRESET)</label>
       <div class="preset-selector">
@@ -343,6 +390,20 @@ HTML_TEMPLATE = """
       document.getElementById('btnQuality').classList.toggle('active', p === 'QUALITY');
     }
 
+    async function normalizeScript() {
+      const script = document.getElementById('scriptText').value;
+      const res = await fetch('/api/preview/normalize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({script})
+      });
+      const data = await res.json();
+      const box = document.getElementById('normBox');
+      box.style.display = 'block';
+      box.innerHTML = `<strong>Kịch bản chuẩn hóa phát âm:</strong><br><span style="color: #6ee7b7;">${data.normalized}</span>`;
+      document.getElementById('scriptText').value = data.normalized;
+    }
+
     async function analyzeScript() {
       const script = document.getElementById('scriptText').value;
       const res = await fetch('/api/preview/script', {
@@ -360,6 +421,7 @@ HTML_TEMPLATE = """
     async function startRender() {
       const avatar = document.getElementById('avatarSelect').value;
       const script = document.getElementById('scriptText').value;
+      const layout = document.getElementById('layoutSelect').value;
       const expressive = document.getElementById('chkExpressive').checked;
       const smooth60 = document.getElementById('chk60fps').checked;
 
@@ -373,6 +435,7 @@ HTML_TEMPLATE = """
           avatar_id: avatar,
           script: script,
           preset: currentPreset,
+          layout: layout,
           expressive_motion: expressive,
           smooth_60fps: smooth60
         })
@@ -380,16 +443,17 @@ HTML_TEMPLATE = """
       const data = await res.json();
       const jobId = data.job_id;
 
-      // Poll status
+      // Poll status with granular phase display
       const timer = setInterval(async () => {
         const jRes = await fetch(`/api/render/jobs/${jobId}`);
         const jData = await jRes.json();
-        document.getElementById('statusText').innerText = `Trạng thái: ${jData.status}`;
+        document.getElementById('statusText').innerText = `Giai đoạn: [${jData.status}]`;
         document.getElementById('statusDetail').innerText = `Tác vụ: ${jobId} | Tiến độ: ${Math.round(jData.progress * 100)}%`;
 
         if (jData.status === 'COMPLETED') {
           clearInterval(timer);
           document.getElementById('btnRender').disabled = false;
+          document.getElementById('statusText').innerText = `Trạng thái: Hoàn thành!`;
           document.getElementById('statusDetail').innerText = `Hoàn thành! Thời lượng: ${jData.duration_sec}s (${jData.net_fps} FPS)`;
           const player = document.getElementById('player');
           player.src = `/renders/${jobId}_${avatar}.mp4`;
@@ -397,7 +461,8 @@ HTML_TEMPLATE = """
         } else if (jData.status === 'FAILED') {
           clearInterval(timer);
           document.getElementById('btnRender').disabled = false;
-          document.getElementById('statusDetail').innerText = `Thất bại: ${jData.error}`;
+          document.getElementById('statusText').innerText = `Trạng thái: Thất bại`;
+          document.getElementById('statusDetail').innerText = `Lỗi: ${jData.error}`;
         }
       }, 2000);
     }

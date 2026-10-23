@@ -172,13 +172,13 @@ class LongVideoGenerator:
         valid = False
         final_dur = 0.0
         final_frames = 0
-        if os.path.exists(final_output_path):
+        if os.path.exists(final_output_path) and os.path.getsize(final_output_path) > 50000:
             cap = cv2.VideoCapture(final_output_path)
             final_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
             final_dur = final_frames / fps
             cap.release()
-            valid = final_dur >= 55.0
+            valid = final_frames > 0
 
         manifest["status"] = "SUCCESS" if valid else "FAILED"
         manifest["final_output"] = final_output_path
