@@ -110,3 +110,8 @@ dist_assets/
 weights/
 reports/
 
+# Local backups & heavy experiment engines
+engines/latentsync/
+archive/backup_deleted_avatars/
+*.bak
+

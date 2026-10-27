@@ -275,18 +275,36 @@ def _uuid_from_job_id(job_id: str) -> str:
 
 
 def _output_path(kind: str, avatar_id: str, label: str,
-                 job_id: Optional[str] = None) -> str:
+                 job_id: Optional[str] = None,
+                 custom_name: Optional[str] = None) -> str:
     """Production render output under D:\\CongThang_AI_Avatar\\renders\\studio\\.
 
-    Globally unique per job: the filename embeds the job's uuid suffix, so two
-    jobs created in the same wall-clock second (e.g. concurrent multi-GPU jobs)
-    can NEVER resolve to the same path. Uniqueness does NOT depend only on the
-    wall clock. An existence guard additionally avoids overwriting any existing
+    When custom_name is provided (e.g. from user input in wizard), names the file
+    cleanly using the user's custom name without chaotic UUID/timestamp prefixes.
+    Globally unique per job: an existence guard avoids overwriting any existing
     real artifact (retry safety).
     """
     config.ensure_renders_dir()
     base_dir = os.path.join(config.RENDERS_DIR, "studio")
     os.makedirs(base_dir, exist_ok=True)
+
+    clean_custom = (custom_name or "").strip()
+    if clean_custom:
+        safe_custom = re.sub(r'[\\/:*?"<>|]', '_', clean_custom).strip()[:100]
+        if safe_custom.lower().endswith(".mp4"):
+            safe_custom = safe_custom[:-4].strip()
+        if safe_custom:
+            if label and label.lower() not in ("full script", "full", "render", "test10s", "mouthtest"):
+                safe_part = re.sub(r'[\\/:*?"<>|]', '_', label).strip()
+                safe_custom = f"{safe_custom}_{safe_part}"
+            name = f"{safe_custom}.mp4"
+            path = os.path.join(base_dir, name)
+            n = 2
+            while os.path.exists(path) and os.path.getsize(path) > 1000:
+                path = os.path.join(base_dir, f"{safe_custom}_{n}.mp4")
+                n += 1
+            return path
+
     safe_avatar = re.sub(r"[^A-Za-z0-9_]+", "_", avatar_id).strip("_") or "avatar"
     safe_label = re.sub(r"[^A-Za-z0-9_]+", "_", label).strip("_") or "render"
     ts = time.strftime("%Y%m%d_%H%M%S")
@@ -359,7 +377,8 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
                     test_type: Optional[str] = None,
                     tts_config: Optional[Dict] = None,
                     sync_mode: Optional[str] = None,
-                    target_language: Optional[str] = None) -> Dict[str, Any]:
+                    target_language: Optional[str] = None,
+                    video_name: Optional[str] = None) -> Dict[str, Any]:
     """Create a 10-second test render job (SAME production quality as full).
 
     tts_provider selects the voice source (ELEVENLABS / EDGE_TTS_TEST). Both
@@ -412,8 +431,10 @@ def create_test_job(avatar_id: str, voice_id: str, script_text: str,
         except Exception:
             pass
 
+    display_name_val = db.sanitize_display_name(video_name) if video_name else None
     db.create_job({
         "job_id": job_id, "kind": "test10s", "avatar_id": avatar_id,
+        "display_name": display_name_val,
         "voice_id": voice_id, "voice_meta": json.dumps(voice_meta, ensure_ascii=False) if voice_meta else None,
         "script_text": script_text[:8000], "script_name": "test10s",
         "script_segment": json.dumps({"mode": "test10s", "target_sec": 10}, ensure_ascii=False),
@@ -521,7 +542,7 @@ def create_full_jobs(avatar_id: str, voice_id: str, script_text: str,
     job_ids = []
     for part in sp["parts"]:
         job_id = _new_job_id()
-        out = _output_path("full", avatar_id, part["label"], job_id)
+        out = _output_path("full", avatar_id, part["label"], job_id, custom_name=video_name)
         audio_src = "generated"
         p_id = None
         p_fp = None
@@ -579,7 +600,8 @@ def retry_job(job_id: str) -> Dict[str, Any]:
     if job["status"] not in ("failed", "cancelled", "timed_out"):
         return {"ok": False, "error": "Only failed/cancelled/timed_out jobs can be retried."}
     new_out = _output_path(job["kind"], job["avatar_id"],
-                           job.get("script_name") or job["kind"], job_id)
+                           job.get("script_name") or job["kind"], job_id,
+                           custom_name=job.get("display_name"))
     db.update_job(job_id, status="queued", progress=0, stage="Queued",
                   error=None, output_path=new_out)
     db.log_activity("JOB_RETRY", "job", job_id,
@@ -649,6 +671,7 @@ def _kill_pid(pid: int) -> None:
 # Background worker (one process per GPU)                                    #
 # --------------------------------------------------------------------------- #
 _WORKER_THREAD = None
+_RUNNING_PROCS: Dict[str, subprocess.Popen] = {}
 _WORKER_EVENT = threading.Event()
 # When True, job creation does NOT auto-start the background worker. Used by
 # tests so they can inspect persisted jobs without the worker racing to claim
@@ -675,7 +698,7 @@ def _worker_loop():
             job = _claim_queued_job()
             if not job:
                 break
-            gpu = gpu_service.acquire()
+            gpu = gpu_service.acquire(job['job_id'])
             if gpu is None:
                 # No free GPU; put the job back and wait.
                 db.update_job(job["job_id"], status="queued", stage="Queued (waiting for GPU)")
@@ -721,156 +744,161 @@ _STAGE_PATTERNS = [
 
 
 def _run_job(job_id: str, gpu_id: int) -> None:
-    job = db.get_job(job_id)
-    if not job:
-        return
-    if job["status"] == "cancelled":
-        gpu_service.release(gpu_id)
-        return
-
-    log_path = os.path.join(config.LOG_DIR, f"{job_id}.log")
-    db.update_job(job_id, gpu_id=gpu_id, log_path=log_path, stage="Preparing audio")
-
-    # 1) Generate master audio. Provider is EXPLICIT per job (ELEVENLABS or
-    #    EDGE_TTS_TEST); never falls back between providers (spec B8). Both feed
-    #    the same locked production renderer. test10s / mouhtest -> ~10s trim.
-    provider = job.get("tts_provider") or ELEVENLABS
-    target_sec = 10.0 if job["kind"] in ("test10s", "mouhtest") else None
-    tts_config = db.parse_json_field(job.get("tts_config"))  # resolved per-voice config (V1.5.0) or None
-    master_override = job.get("master_audio_path") if job.get("audio_source") == "script_preview" else None
-    audio = generate_master_audio(job["script_text"], job["voice_id"],
-                                  target_sec=target_sec, tts_provider=provider,
-                                  tts_config=tts_config,
-                                  master_audio_override=master_override)
-    if not audio["ok"]:
-        db.update_job(job_id, status="failed", stage="Failed", error=audio["error"])
-        gpu_service.release(gpu_id)
-        return
-    cond_path = audio["cond_path"]
-    master_path = audio["master_path"]
-    db.update_job(job_id, master_audio_path=master_path,
-                  duration_sec=audio.get("duration_sec"),
-                  stage="Rendering Lip-sync", progress=5)
-
-    # 2) Run the production renderer with the locked truth. MuseTalk conditioning
-    #    uses cond_path (16 kHz mono, unchanged). The final MP4 audio comes from
-    #    master_path when it differs from cond_path (V1.5.0 two-audio-path); else
-    #    --master-audio is omitted (legacy backward-compatible behavior).
-    out = job["output_path"]
-    cmd = [_torch_python(),
-           config.RENDERER,
-           "--avatar_id", job["avatar_id"],
-           "--audio", cond_path,
-           "--output", out]
-    if master_path and master_path != cond_path:
-        cmd += ["--master-audio", master_path]
-    env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-    env["LIVETALKING_GPU_ID"] = "0"
-    env["OFFLINE_USE_MULTI_GPU"] = "false"
-    env["LIVETALKING_CUDA_GRAPH"] = "true"
-    # Keep the renderer on the locked truth path (no experimental config).
-    env.pop("LIVETALKING_EXPERIMENTAL_CONFIG", None)
-
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                text=True, cwd=config.ROOT, env=env,
-                                encoding="utf-8", errors="replace")
-    except Exception as e:
-        db.update_job(job_id, status="failed", stage="Failed",
-                      error=f"Failed to start renderer: {e}")
-        gpu_service.release(gpu_id)
-        return
+        job = db.get_job(job_id)
+        if not job or job.get("status") == "cancelled":
+            return
 
-    db.update_job(job_id, pid=proc.pid)
-    last_pct = 5
-    # Progress-aware timeout: a watchdog kills the renderer only if it produces
-    # NO stdout for STUDIO_RENDER_NO_PROGRESS_SEC (default 300s). A slow but
-    # progressing long render is NOT killed — only a truly hung process is.
-    # Plus a hard backstop STUDIO_RENDER_HARD_TIMEOUT_SEC (default 14400s/4h).
-    no_progress_timeout = float(os.environ.get("STUDIO_RENDER_NO_PROGRESS_SEC", "300"))
-    hard_timeout = float(os.environ.get("STUDIO_RENDER_HARD_TIMEOUT_SEC", "14400"))
-    start = time.monotonic()
-    last_activity = {"t": time.monotonic()}
-    timed_out = {"flag": False}
+        log_path = os.path.join(config.LOG_DIR, f"{job_id}.log")
+        db.update_job(job_id, gpu_id=gpu_id, log_path=log_path, stage="Preparing audio")
 
-    def _watchdog():
-        while proc.poll() is None:
-            time.sleep(5)
-            now = time.monotonic()
-            if now - last_activity["t"] > no_progress_timeout:
-                timed_out["flag"] = True
-                runtime.terminate_tree(proc)
-                return
-            if now - start > hard_timeout:
-                timed_out["flag"] = True
-                runtime.terminate_tree(proc)
-                return
+        provider = job.get("tts_provider") or ELEVENLABS
+        target_sec = 10.0 if job["kind"] in ("test10s", "mouhtest") else None
+        tts_config = db.parse_json_field(job.get("tts_config"))
+        master_override = job.get("master_audio_path") if job.get("audio_source") == "script_preview" else None
 
-    import threading as _th
-    wd = _th.Thread(target=_watchdog, daemon=True)
-    wd.start()
+        audio = generate_master_audio(job["script_text"], job["voice_id"],
+                                      target_sec=target_sec, tts_provider=provider,
+                                      tts_config=tts_config,
+                                      master_audio_override=master_override)
+        if not audio["ok"]:
+            db.update_job(job_id, status="failed", stage="Failed", error=audio["error"])
+            return
 
-    try:
-        with open(log_path, "w", encoding="utf-8") as logf:
-            for line in proc.stdout:
-                logf.write(line)
-                logf.flush()
-                last_activity["t"] = time.monotonic()
-                m = _TQDM.search(line)
-                if m:
-                    pct = int(m.group(1))
-                    # Map tqdm 0..100 (render phase) into 5..88 of overall.
-                    overall = 5 + int(pct * 0.83)
-                    if overall > last_pct:
-                        last_pct = overall
-                        db.update_job(job_id, progress=overall)
-                    continue
-                for pat, stage, pct in _STAGE_PATTERNS:
-                    if pat.search(line):
-                        db.update_job(job_id, stage=stage)
-                        if pct is not None and pct > last_pct:
-                            last_pct = pct
-                            db.update_job(job_id, progress=pct)
-                        break
-        proc.wait(timeout=60)
-    except Exception as e:
-        db.update_job(job_id, status="failed", stage="Failed",
-                      error=f"Renderer error: {e}")
-        gpu_service.release(gpu_id)
-        return
+        # Check if cancelled during audio generation
+        cur = db.get_job(job_id)
+        if not cur or cur.get("status") == "cancelled":
+            return
 
-    if timed_out["flag"]:
+        cond_path = audio["cond_path"]
+        master_path = audio["master_path"]
+        db.update_job(job_id, master_audio_path=master_path,
+                      duration_sec=audio.get("duration_sec"),
+                      stage="Rendering Lip-sync", progress=5)
+
+        out = job["output_path"]
+        cmd = [_torch_python(),
+               config.RENDERER,
+               "--avatar_id", job["avatar_id"],
+               "--audio", cond_path,
+               "--output", out]
+        if master_path and master_path != cond_path:
+            cmd += ["--master-audio", master_path]
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+        env["LIVETALKING_GPU_ID"] = "0"
+        env["OFFLINE_USE_MULTI_GPU"] = "false"
+        env["LIVETALKING_CUDA_GRAPH"] = "true"
+        env.pop("LIVETALKING_EXPERIMENTAL_CONFIG", None)
+
         try:
-            proc.wait(timeout=15)
-        except Exception:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                    text=True, cwd=config.ROOT, env=env,
+                                    encoding="utf-8", errors="replace")
+            _RUNNING_PROCS[job_id] = proc
+        except Exception as e:
+            db.update_job(job_id, status="failed", stage="Failed",
+                          error=f"Failed to start renderer: {e}")
+            return
+
+        # Check if cancelled right as process spawned
+        cur = db.get_job(job_id)
+        if not cur or cur.get("status") == "cancelled":
             runtime.terminate_tree(proc)
-        db.update_job(job_id, status="timed_out", stage="Timed Out", progress=0,
-                      error="Renderer hung (no progress for %.0fs) — terminated."
-                            % no_progress_timeout)
-        gpu_service.release(gpu_id)
-        return
+            return
 
-    rc = proc.returncode
-    if rc != 0:
-        tail = _tail(log_path, 15)
-        db.update_job(job_id, status="failed", stage="Failed", progress=0,
-                      error=f"Renderer exited code {rc}. {tail}")
-        gpu_service.release(gpu_id)
-        return
+        db.update_job(job_id, pid=proc.pid)
+        last_pct = 5
+        no_progress_timeout = float(os.environ.get("STUDIO_RENDER_NO_PROGRESS_SEC", "300"))
+        hard_timeout = float(os.environ.get("STUDIO_RENDER_HARD_TIMEOUT_SEC", "14400"))
+        start = time.monotonic()
+        last_activity = {"t": time.monotonic()}
+        timed_out = {"flag": False}
 
-    # 3) Verify.
-    db.update_job(job_id, status="verifying", stage="Verifying", progress=95)
-    vr = verify_mod.verify(out)
-    if not vr["ok"]:
-        db.update_job(job_id, status="failed", stage="Failed",
-                      error="Post-render verification failed: " + "; ".join(vr["warnings"]))
-        gpu_service.release(gpu_id)
-        return
+        def _watchdog():
+            while proc.poll() is None:
+                time.sleep(2)
+                cur_j = db.get_job(job_id)
+                if cur_j and cur_j.get("status") == "cancelled":
+                    runtime.terminate_tree(proc)
+                    return
+                now = time.monotonic()
+                if now - last_activity["t"] > no_progress_timeout:
+                    timed_out["flag"] = True
+                    runtime.terminate_tree(proc)
+                    return
+                if now - start > hard_timeout:
+                    timed_out["flag"] = True
+                    runtime.terminate_tree(proc)
+                    return
 
-    db.update_job(job_id, status="complete", stage="Complete", progress=100,
-                  error=None)
-    gpu_service.release(gpu_id)
+        import threading as _th
+        wd = _th.Thread(target=_watchdog, daemon=True)
+        wd.start()
+
+        try:
+            with open(log_path, "w", encoding="utf-8") as logf:
+                for line in proc.stdout:
+                    logf.write(line)
+                    logf.flush()
+                    last_activity["t"] = time.monotonic()
+                    m = _TQDM.search(line)
+                    if m:
+                        pct = int(m.group(1))
+                        overall = 5 + int(pct * 0.83)
+                        if overall > last_pct:
+                            last_pct = overall
+                            db.update_job(job_id, progress=overall)
+                        continue
+                    for pat, stage, pct in _STAGE_PATTERNS:
+                        if pat.search(line):
+                            db.update_job(job_id, stage=stage)
+                            if pct is not None and pct > last_pct:
+                                last_pct = pct
+                                db.update_job(job_id, progress=pct)
+                            break
+            proc.wait(timeout=60)
+        except Exception as e:
+            cur_j = db.get_job(job_id)
+            if not cur_j or cur_j.get("status") != "cancelled":
+                db.update_job(job_id, status="failed", stage="Failed",
+                              error=f"Renderer error: {e}")
+            return
+
+        cur_j = db.get_job(job_id)
+        if cur_j and cur_j.get("status") == "cancelled":
+            return
+
+        if timed_out["flag"]:
+            try:
+                proc.wait(timeout=15)
+            except Exception:
+                runtime.terminate_tree(proc)
+            db.update_job(job_id, status="timed_out", stage="Timed Out", progress=0,
+                          error="Renderer hung (no progress for %.0fs) — terminated."
+                                % no_progress_timeout)
+            return
+
+        rc = proc.returncode
+        if rc != 0:
+            tail = _tail(log_path, 15)
+            db.update_job(job_id, status="failed", stage="Failed", progress=0,
+                          error=f"Renderer exited code {rc}. {tail}")
+            return
+
+        # 3) Verify.
+        db.update_job(job_id, status="verifying", stage="Verifying", progress=95)
+        vr = verify_mod.verify(out)
+        if not vr["ok"]:
+            db.update_job(job_id, status="failed", stage="Failed",
+                          error="Post-render verification failed: " + "; ".join(vr["warnings"]))
+            return
+
+        db.update_job(job_id, status="complete", stage="Complete", progress=100,
+                      error=None)
+    finally:
+        _RUNNING_PROCS.pop(job_id, None)
+        gpu_service.release(job_id)
 
 
 def _tail(path: str, n: int) -> str:

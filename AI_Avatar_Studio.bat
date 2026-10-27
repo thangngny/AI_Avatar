@@ -1,16 +1,15 @@
 @echo off
 REM =====================================================================
-REM  AI Avatar Studio NextGen — local launcher (RTX 5090 Blackwell sm_120)
-REM  Starts the Flask controller + opens the browser.
+REM  AI Avatar Studio NextGen V2 — Local Launcher (RTX 5090 Blackwell sm_120)
+REM  Multi-Band Laplacian Pyramid + Dental Enamel SOTA
 REM =====================================================================
 setlocal
 
-set "STUDIO_PY=C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe"
-if not exist "%STUDIO_PY%" set "STUDIO_PY=%~dp0..\runtime_nextgen\venv\Scripts\python.exe"
-if not exist "%STUDIO_PY%" set "STUDIO_PY=D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
-if not exist "%STUDIO_PY%" set "STUDIO_PY=C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe"
-if not exist "%STUDIO_PY%" set "STUDIO_PY=%~dp0..\runtime\venv\Scripts\python.exe"
-set "PORT=8078"
+set "STUDIO_PY=C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe"
+if not exist "%STUDIO_PY%" set "STUDIO_PY=%~dp0..\runtime_avatar_v2\Scripts\python.exe"
+if not exist "%STUDIO_PY%" set "STUDIO_PY=C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe"
+
+set "PORT=8178"
 set "HOST=127.0.0.1"
 
 cd /d "%~dp0"
@@ -27,7 +26,8 @@ if not exist "%STUDIO_PY%" (
 )
 
 echo =====================================================================
-echo  AI AVATAR STUDIO NEXTGEN (RTX 5090 BLACKWELL EDITION)
+echo  AI AVATAR STUDIO NEXTGEN V2 (RTX 5090 BLACKWELL EDITION)
+echo  Photoreal Multi-Band Laplacian Pyramid Blending
 echo  URL: http://%HOST%:%PORT%/
 echo =====================================================================
 

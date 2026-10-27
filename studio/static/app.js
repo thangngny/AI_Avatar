@@ -133,6 +133,7 @@ const ls = {
 const state = {
   view: "home", status: null, avatars: [], selectedAvatar: null,
   scriptText: "", scriptInfo: null, voiceId: "", voiceMeta: null, voiceChecked: false,
+  videoName: "", // persistent custom video title across steps
   splitMode: "full", prepState: null, jobFilter: "all", historySearch: "",
   libFilter: "all", libSort: "quality", libSearch: "",
   // TTS provider: "elevenlabs" (production) | "edge" (free test). Explicit,
@@ -150,6 +151,7 @@ const state = {
   // V1.6.0 — the normal Render flow exposes exactly the approved ElevenLabs
   // voices (no free-text Voice ID). Names come from official metadata.
   approvedVoices: [],
+  voiceFilter: "vi", voiceSearch: "",
   // V1.6.0 — Script Voice Preview & Audio Reuse
   scriptPreview: null,
   previewGenerating: false,
@@ -206,6 +208,14 @@ async function handleScriptFileUpload(f) {
       state.scriptInfo = d;
       const ta = $("#qScript");
       if (ta) ta.value = d.text;
+      if (!state.videoName && f && f.name) {
+        const baseName = f.name.replace(/\.[^/.]+$/, "").trim();
+        if (baseName) {
+          state.videoName = baseName;
+          const qVName = $("#qVideoName");
+          if (qVName) qVName.value = baseName;
+        }
+      }
       updateScriptInfo();
       quickRefresh();
       toast(`Đã tải ${d.source || f.name}: ${d.words} từ, ~${d.estimated_duration_str}`, "good");
@@ -329,8 +339,32 @@ async function loadAvatars() {
   state.avatars = r.avatars || [];
 }
 
+// Unified audio cleanup across view switches and video playback modals
+function stopAllAudio() {
+  try {
+    if (typeof _sampleAudio !== "undefined" && _sampleAudio) {
+      _sampleAudio.pause();
+      _sampleAudio.currentTime = 0;
+    }
+  } catch (e) {}
+  try {
+    const qp = $("#qPreview");
+    if (qp) {
+      qp.pause();
+      qp.currentTime = 0;
+    }
+  } catch (e) {}
+  try {
+    document.querySelectorAll("audio").forEach(a => {
+      a.pause();
+      a.currentTime = 0;
+    });
+  } catch (e) {}
+}
+
 // Navigation
 function switchView(v) {
+  stopAllAudio();
   state.view = v;
   $$(".nav-item").forEach(b => b.classList.toggle("active", b.dataset.view === v));
   if (v === "home") renderHome();
@@ -508,7 +542,7 @@ async function renderQuick() {
           <div id="qReview" class="review-grid"></div>
           <div class="field-group" style="margin-top:16px;margin-bottom:14px">
             <label for="qVideoName" style="font-size:13px;font-weight:600;display:block;margin-bottom:6px">Tên video (tùy chọn)</label>
-            <input id="qVideoName" type="text" placeholder="Ví dụ: Giới thiệu sản phẩm, Bản tin sáng, Video quảng cáo..." maxlength="120" style="width:100%;box-sizing:border-box" />
+            <input id="qVideoName" type="text" placeholder="Ví dụ: Giới thiệu sản phẩm, Bản tin sáng, Video quảng cáo..." maxlength="120" style="width:100%;box-sizing:border-box" value="${esc(state.videoName || '')}" />
             <div class="hint" style="margin-top:4px;font-size:11px">Đặt tên giúp bạn dễ tìm kiếm lại trong Lịch sử video.</div>
           </div>
           <div class="actions">
@@ -533,7 +567,10 @@ async function renderQuick() {
       <button class="ghost" onclick="switchView('create')">＋ Tạo AI Avatar trước</button></div>`;
   } else {
     sel.innerHTML = `<option value="">— Chọn Avatar —</option>` +
-      readyAvs.map(a => `<option value="${esc(a.avatar_id)}">${esc(a.avatar_id)} · Sẵn sàng · ${esc(TYPE_VI[a.avatar_type] || a.avatar_type)}</option>`).join("");
+      readyAvs.map(a => {
+        const dName = (a.name && a.name !== a.avatar_id) ? `${a.name} (${a.avatar_id})` : a.avatar_id;
+        return `<option value="${esc(a.avatar_id)}">${esc(dName)} · Sẵn sàng · ${esc(TYPE_VI[a.avatar_type] || a.avatar_type)}</option>`;
+      }).join("");
   }
   sel.onchange = () => {
     const a = state.avatars.find(x => x.avatar_id === sel.value);
@@ -586,6 +623,13 @@ async function renderQuick() {
       await handleScriptFileUpload(f);
     };
   }
+  const qVNameEl = $("#qVideoName");
+  if (qVNameEl) {
+    qVNameEl.value = state.videoName || "";
+    qVNameEl.oninput = (e) => {
+      state.videoName = e.target.value;
+    };
+  }
   updateScriptInfo(); updateSegPreview();
   quickRefresh();
 }
@@ -608,6 +652,7 @@ function quickSummary(n) {
   if (n === 2) { const w = state.scriptText.trim() ? state.scriptText.split(/\s+/).filter(Boolean).length : 0; return w ? `${w} từ` : "Chưa nhập"; }
   if (n === 3) return state.ttsProvider === "edge" ? "Edge TTS (miễn phí)" : (state.voiceId ? "ElevenLabs" : "Chưa chọn giọng");
   if (n === 4) return "Tùy chọn";
+  if (n === 5) return state.videoName ? esc(state.videoName) : "Tự động";
   return "";
 }
 // Re-render summaries/stepper/disabled state without rebuilding the whole view
@@ -761,6 +806,18 @@ function renderPreflightUI(res) {
 }
 function quickGoto(n) {
   if (n < 1 || n > 5) return;
+  // Prerequisite gating when user navigates forward
+  if (n > state.quickStep) {
+    if (n >= 2 && !state.selectedAvatar) {
+      return toast("Vui lòng chọn một AI Avatar ở Bước 1 trước.", "warn");
+    }
+    if (n >= 3 && (!state.scriptText || !state.scriptText.trim())) {
+      return toast("Vui lòng nhập nội dung kịch bản ở Bước 2 trước.", "warn");
+    }
+    if (n >= 4 && !quickVoiceReady()) {
+      return toast("Vui lòng chọn giọng đọc ở Bước 3 trước.", "warn");
+    }
+  }
   state.quickStep = n;
   state.quickMax = Math.max(state.quickMax, n);
   quickRefresh();
@@ -889,34 +946,35 @@ function renderTTSPanel() {
     const esel = $("#qEdgeVoice");
     if (esel) esel.onchange = (e) => { state.edgeVoice = e.target.value; ls.set("studio_edge_voice", e.target.value); };
   } else {
-    if (note) note.innerHTML = `<span class="tag good">ElevenLabs</span> <span class="muted">Giọng đọc AI chất lượng cao.</span>`;
+    if (note) note.innerHTML = `<span class="tag good">ElevenLabs</span> <span class="muted">Giọng đọc AI chất lượng cao trực tiếp từ tài khoản ElevenLabs.</span>`;
     panel.innerHTML = `
-      <label style="font-weight:600;font-size:13px;margin-bottom:8px">Giọng đọc gợi ý</label>
-      <div id="qVoiceCards" class="voice-cards"></div>
-      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>
+      <!-- ElevenLabs Connection & Live Quota Status Bar -->
+      <div id="elAccountBar"></div>
 
-      <!-- Thư viện giọng từ tài khoản ElevenLabs -->
-      <div class="voice-account-box" style="margin-top:14px;background:var(--card,#1a1a1f);border:1px solid var(--border,#333);border-radius:8px;padding:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <span style="font-weight:600;font-size:13px">🎙️ Giọng từ tài khoản ElevenLabs</span>
-          <button type="button" class="ghost tiny" onclick="loadAccountVoices(true)">🔄 Tải lại</button>
-        </div>
-        <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap">
-          <select id="qAccountVoicesSelect" style="flex:1;min-width:240px" onchange="onAccountVoiceDropdownChange()">
-            <option value="">— Đang tải danh sách giọng… —</option>
-          </select>
-          <button type="button" class="primary tiny" onclick="applyAccountVoiceSelection()">Dùng giọng này</button>
-          <button type="button" class="ghost tiny" id="qAccountVoicePreviewBtn" style="display:none" onclick="playAccountVoicePreview()">▶ Nghe mẫu</button>
-        </div>
-        <div id="qAccountVoiceDesc" class="muted" style="font-size:12px;margin-top:6px"></div>
-
-        <div style="margin-top:10px;border-top:1px dashed var(--border,#333);padding-top:10px">
-          <div class="row" style="gap:8px">
-            <input id="qCustomVoiceInput" type="text" placeholder="Hoặc dán mã Voice ID khác từ ElevenLabs..." style="flex:1;font-size:13px" />
-            <button type="button" class="secondary tiny" onclick="submitCustomVoiceInput()">Thêm giọng</button>
-          </div>
+      <!-- Voice Filter Toolbar: Categories & Search -->
+      <div class="voice-toolbar" style="margin-top:10px;margin-bottom:12px;display:flex;flex-direction:column;gap:10px">
+        <div class="filter-chips" id="voiceFilterChips" style="margin:0"></div>
+        <div class="row" style="gap:8px">
+          <input id="qVoiceSearchInput" placeholder="🔍 Tìm kiếm giọng theo tên (Giang, Thắm, Phong, Sarah...), phong cách, vùng miền..." style="flex:1" value="${esc(state.voiceSearch||'')}" />
+          ${state.voiceSearch ? `<button type="button" class="ghost tiny" onclick="clearVoiceSearch()">✕ Xóa tìm</button>` : ''}
         </div>
       </div>
+
+      <!-- Voice Cards Grid -->
+      <div id="qVoiceCards" class="voice-cards-grid"></div>
+      <div id="qVoiceInfo" style="margin-top:8px;font-size:12px"></div>
+
+      <!-- Custom Voice ID connection -->
+      <details class="tech" style="margin-top:12px">
+        <summary>＋ Thêm mã Voice ID tùy chọn từ bên ngoài</summary>
+        <div style="margin-top:10px">
+          <div class="row" style="gap:8px">
+            <input id="qCustomVoiceInput" type="text" placeholder="Dán mã Voice ID từ ElevenLabs (ví dụ: 21m00Tcm4TlvDq8ikWAM)..." style="flex:1;font-size:13px" />
+            <button type="button" class="secondary tiny" onclick="submitCustomVoiceInput()">Kết nối Voice ID</button>
+          </div>
+          <div class="hint" style="margin-top:6px;font-size:11px">Dùng khi bạn muốn kết nối một Voice ID được chia sẻ từ tài khoản ElevenLabs khác.</div>
+        </div>
+      </details>
 
       <div class="row" style="margin-top:14px;gap:12px;align-items:flex-start;flex-wrap:wrap">
         <div style="flex:1;min-width:260px">
@@ -950,8 +1008,18 @@ function renderTTSPanel() {
           <div id="syncPanel"></div>
         </div>
       </details>`;
+
+    updateElevenLabsStatus();
     renderVoiceCards();
     loadAccountVoices();
+
+    const vsi = $("#qVoiceSearchInput");
+    if (vsi) {
+      vsi.oninput = (e) => {
+        state.voiceSearch = e.target.value;
+        renderVoiceCards();
+      };
+    }
     const msel = $("#qModelSelect");
     if (msel) {
       const curMid = state.voiceConfig?.model_id || state.selectedModel || state.status?.elevenlabs_model_id || "eleven_v4";
@@ -1277,7 +1345,7 @@ function useStandardMouthScript() {
   toast("Đã dùng đoạn test chuẩn", "good");
 }
 async function renderMouthTest() {
-  const av = $("#qAvatar").value;
+  const av = ($("#qAvatar") ? $("#qAvatar").value : "") || (state.selectedAvatar ? state.selectedAvatar.avatar_id : "");
   if (!canStartNewWork()) return;
   if (!av) return toast("Chọn Avatar", "warn");
   const script = ($("#qMouthScript") && $("#qMouthScript").value.trim()) || STANDARD_MOUTH_TEST_SCRIPT;
@@ -1292,10 +1360,13 @@ function renderAvatarPick(a) {
   if (!a) { box.innerHTML = ""; return; }
   const q = a.quality_status;
   const qm = qMeta(q);
+  const nameHTML = (a.name && a.name !== a.avatar_id)
+    ? `<b>${esc(a.name)}</b> <span class="muted" style="font-size:12px">(${esc(a.avatar_id)})</span>`
+    : `<b>${esc(a.avatar_id)}</b>`;
   box.innerHTML = `<div class="avatar-pick">
     <img src="/api/avatars/${esc(a.avatar_id)}/thumbnail" onerror="this.style.opacity=.3" />
     <div class="ap-meta">
-      <div class="ap-name">${esc(a.avatar_id)} <span class="tag good">SẴN SÀNG</span></div>
+      <div class="ap-name">${nameHTML} <span class="tag good">SẴN SÀNG</span></div>
       <div class="ap-sub">${esc(TYPE_VI[a.avatar_type] || a.avatar_type)} · ${esc(qm.short)}</div>
     </div>
   </div>`;
@@ -1478,9 +1549,10 @@ function playVoiceSample(vid) {
   state.playingSampleVid = vid;
   renderVoiceCards();
 
+  const allV = getAllAvailableVoices().find(v => v.voice_id === vid);
   const customV = (state.customVoices || []).find(v => v.voice_id === vid);
   const accV = (state.accountVoices || []).find(v => v.voice_id === vid);
-  const audioUrl = (customV && customV.preview_url) || (accV && accV.preview_url) || `/api/voices/approved/${encodeURIComponent(vid)}/sample`;
+  const audioUrl = (allV && allV.preview_url) || (customV && customV.preview_url) || (accV && accV.preview_url) || `/api/voices/approved/${encodeURIComponent(vid)}/sample`;
 
   _sampleAudio = new Audio(audioUrl);
   _sampleAudio.onended = () => {
@@ -1497,69 +1569,197 @@ function playVoiceSample(vid) {
   _sampleAudio.play().catch(() => {});
 }
 
-function renderVoiceCards() {
-  const box = $("#qVoiceCards"); if (!box) return;
-  const baseVoices = state.approvedVoices && state.approvedVoices.length ? state.approvedVoices : [
-    { voice_id: "pGapy9MNHCukzJtjavF0", display_name: "Hạnh", description: "Giọng nữ Hà Nội nhẹ nhàng, truyền cảm", human_approved: false },
+// Unified voice aggregation from ElevenLabs account, approved catalog & custom voices
+function getAllAvailableVoices() {
+  const accountList = state.accountVoices || [];
+  const customList = state.customVoices || [];
+  const baseList = state.approvedVoices && state.approvedVoices.length ? state.approvedVoices : [
+    { voice_id: "pGapy9MNHCukzJtjavF0", display_name: "Hạnh", description: "Giọng nữ Hà Nội nhẹ nhàng, truyền cảm", human_approved: true },
     { voice_id: "N0Z0aL8qHhzwUHwRBcVo", display_name: "Thanh", description: "Giọng nữ Sài Gòn rõ ràng, ấm áp", human_approved: true },
   ];
 
-  const customCards = (state.customVoices || []).map(cv => ({
-    voice_id: cv.voice_id,
-    display_name: cv.name || cv.voice_id,
-    description: cv.description || (cv.category ? `Giọng ${cv.category} từ ElevenLabs` : "Giọng tùy chỉnh"),
-    human_approved: false,
-    is_custom: true,
-    preview_url: cv.preview_url
-  }));
+  const map = new Map();
 
-  const allVoices = [...baseVoices, ...customCards];
+  // 1. Add base recommended catalog
+  baseList.forEach(v => {
+    map.set(v.voice_id, {
+      voice_id: v.voice_id,
+      name: (v.display_name || v.name || v.voice_id).split(' - ')[0],
+      fullName: v.display_name || v.name || v.voice_id,
+      category: v.category || "approved",
+      description: v.description || "",
+      is_vietnamese: true,
+      human_approved: v.human_approved ?? true,
+      preview_url: v.preview_url || `/api/voices/approved/${encodeURIComponent(v.voice_id)}/sample`,
+      labels: v.labels || { language: 'vi', gender: 'female' }
+    });
+  });
 
-  box.className = "voice-cards";
-  box.innerHTML = allVoices.map(v => {
+  // 2. Add or enrich with all account voices directly from ElevenLabs
+  accountList.forEach(v => {
+    const existing = map.get(v.voice_id);
+    const labels = v.labels || {};
+    const lowerName = (v.name || '').toLowerCase();
+    const isVi = (labels.language === 'vi') ||
+                 ['nhật phong', 'giang', 'thắm', 'hạnh', 'kim', 'thanh'].some(n => lowerName.includes(n));
+    const cleanName = (v.name || v.voice_id).split(' - ')[0];
+
+    map.set(v.voice_id, {
+      voice_id: v.voice_id,
+      name: cleanName,
+      fullName: v.name || v.voice_id,
+      category: v.category || (existing ? existing.category : "account"),
+      description: v.description || (existing ? existing.description : ""),
+      is_vietnamese: isVi,
+      human_approved: existing ? existing.human_approved : isVi,
+      preview_url: v.preview_url || (existing ? existing.preview_url : ""),
+      labels: {
+        ...(existing?.labels || {}),
+        ...labels
+      }
+    });
+  });
+
+  // 3. Add custom voices
+  customList.forEach(v => {
+    if (!map.has(v.voice_id)) {
+      const labels = v.labels || {};
+      map.set(v.voice_id, {
+        voice_id: v.voice_id,
+        name: v.name || v.voice_id,
+        fullName: v.name || v.voice_id,
+        category: v.category || "custom",
+        description: v.description || "Giọng tùy chỉnh",
+        is_vietnamese: (labels.language === 'vi'),
+        human_approved: false,
+        is_custom: true,
+        preview_url: v.preview_url || "",
+        labels: labels
+      });
+    }
+  });
+
+  return Array.from(map.values());
+}
+
+function setVoiceFilter(f) {
+  state.voiceFilter = f;
+  renderVoiceCards();
+}
+
+function clearVoiceSearch() {
+  state.voiceSearch = "";
+  const inp = $("#qVoiceSearchInput");
+  if (inp) inp.value = "";
+  renderVoiceCards();
+}
+
+function renderVoiceCards() {
+  const box = $("#qVoiceCards"); if (!box) return;
+  const allVoices = getAllAvailableVoices();
+
+  // If no voice selected yet, pick the first Vietnamese voice or state.voiceId
+  if (!state.voiceId && allVoices.length) {
+    const defaultV = allVoices.find(v => v.is_vietnamese) || allVoices[0];
+    state.voiceId = defaultV.voice_id;
+    ls.set("studio_voiceId", state.voiceId);
+  }
+
+  // Filter chips count
+  const viVoices = allVoices.filter(v => v.is_vietnamese);
+  const clonedVoices = allVoices.filter(v => v.category === 'cloned' || v.category === 'professional');
+  const femaleVoices = allVoices.filter(v => (v.labels?.gender === 'female' || (v.description && v.description.toLowerCase().includes('nữ'))));
+  const maleVoices = allVoices.filter(v => (v.labels?.gender === 'male' || (v.description && v.description.toLowerCase().includes('nam'))));
+
+  // Render Filter Chips
+  const curF = state.voiceFilter || "vi";
+  const chipsEl = $("#voiceFilterChips");
+  if (chipsEl) {
+    chipsEl.innerHTML = `
+      <span class="fchip ${curF==='vi'?'active':''}" data-vf="vi" onclick="setVoiceFilter('vi')">🇻🇳 Tiếng Việt (${viVoices.length})</span>
+      <span class="fchip ${curF==='cloned'?'active':''}" data-vf="cloned" onclick="setVoiceFilter('cloned')">👤 Giọng của bạn / Clone (${clonedVoices.length})</span>
+      <span class="fchip ${curF==='female'?'active':''}" data-vf="female" onclick="setVoiceFilter('female')">♀️ Giọng Nữ (${femaleVoices.length})</span>
+      <span class="fchip ${curF==='male'?'active':''}" data-vf="male" onclick="setVoiceFilter('male')">♂️ Giọng Nam (${maleVoices.length})</span>
+      <span class="fchip ${curF==='all'?'active':''}" data-vf="all" onclick="setVoiceFilter('all')">Tất cả (${allVoices.length})</span>`;
+  }
+
+  // Apply active category filter
+  let list = allVoices;
+  if (curF === "vi") list = viVoices.length ? viVoices : allVoices;
+  else if (curF === "cloned") list = clonedVoices;
+  else if (curF === "female") list = femaleVoices;
+  else if (curF === "male") list = maleVoices;
+
+  // Apply search query
+  const q = (state.voiceSearch || "").trim().toLowerCase();
+  if (q) {
+    list = list.filter(v =>
+      (v.name && v.name.toLowerCase().includes(q)) ||
+      (v.fullName && v.fullName.toLowerCase().includes(q)) ||
+      (v.description && v.description.toLowerCase().includes(q)) ||
+      (v.voice_id && v.voice_id.toLowerCase().includes(q)) ||
+      (v.labels?.accent && v.labels.accent.toLowerCase().includes(q)) ||
+      (v.labels?.gender && v.labels.gender.toLowerCase().includes(q))
+    );
+  }
+
+  if (!list.length) {
+    box.innerHTML = `<div class="empty" style="padding:24px 16px;text-align:center">
+      <div style="font-size:24px;margin-bottom:6px">🔍</div>
+      <div class="e-title">Không tìm thấy giọng đọc phù hợp</div>
+      <div class="e-sub">${q ? `Không có giọng nào khớp với từ khóa "${esc(q)}".` : "Không có giọng nào trong danh mục này."}</div>
+      <button type="button" class="ghost tiny" style="margin-top:8px" onclick="setVoiceFilter('all')">Xem tất cả ${allVoices.length} giọng</button>
+    </div>`;
+    return;
+  }
+
+  box.innerHTML = list.map(v => {
     const sel = state.voiceId === v.voice_id;
     const isPlaying = state.playingSampleVid === v.voice_id;
-    const displayName = (v.display_name || v.voice_id).split(' - ')[0];
-    let badge = v.human_approved
-      ? `<span class="tag good">Khuyên dùng cho Tiếng Việt</span>`
-      : (v.is_custom ? `<span class="tag good">Giọng của bạn</span>` : `<span class="tag muted">Khuyên dùng</span>`);
+    const labels = v.labels || {};
 
-    let deleteBtn = "";
-    if (v.is_custom) {
-      deleteBtn = `<button type="button" class="ghost tiny danger-text" title="Bỏ giọng này khỏi danh sách thẻ" onclick="event.preventDefault(); event.stopPropagation(); deleteCustomVoiceCard('${esc(v.voice_id)}')">✕ Bỏ</button>`;
+    let tagHtml = "";
+    if (v.is_vietnamese) {
+      const region = labels.accent === 'southern' ? 'Miền Nam' : (labels.accent === 'northern' ? 'Miền Bắc' : '');
+      const gender = labels.gender === 'male' ? 'Nam' : (labels.gender === 'female' ? 'Nữ' : '');
+      const desc = [gender, region].filter(Boolean).join(' · ');
+      tagHtml = `<span class="tag good">${desc || 'Tiếng Việt'}</span>`;
+    } else {
+      const accent = labels.accent || labels.language || '';
+      const gender = labels.gender === 'male' ? 'Nam' : (labels.gender === 'female' ? 'Nữ' : '');
+      tagHtml = `<span class="tag muted">${[gender, accent].filter(Boolean).join(' · ') || 'Quốc tế'}</span>`;
     }
 
-    const hasSample = !v.is_custom || !!v.preview_url;
+    if (v.category === 'cloned' || v.category === 'professional') {
+      tagHtml += ` <span class="tag" style="background:var(--accent-soft);color:var(--accent)">Clone / Pro</span>`;
+    }
 
-    return `<label class="voice-card${sel ? " selected" : ""}" data-vid="${esc(v.voice_id)}">
-      <input type="radio" name="vcard" value="${esc(v.voice_id)}" ${sel ? "checked" : ""} aria-label="${esc(displayName)}" />
+    const hasSample = !!v.preview_url;
+
+    return `<div class="voice-card${sel ? " selected" : ""}" data-vid="${esc(v.voice_id)}" onclick="selectVoice('${esc(v.voice_id)}')">
+      <input type="radio" name="vcard" value="${esc(v.voice_id)}" ${sel ? "checked" : ""} style="pointer-events:none" />
       <div class="voice-card-body">
         <div class="voice-card-top">
-          <div class="voice-card-name">${esc(displayName)}</div>
+          <div class="voice-card-name">${esc(v.name)}</div>
           <div style="display:flex;gap:4px;align-items:center">
             ${hasSample ? `
             <button type="button" class="voice-sample-btn${isPlaying ? ' playing' : ''}" onclick="event.preventDefault(); event.stopPropagation(); playVoiceSample('${esc(v.voice_id)}')">
               ${isPlaying ? '⏸ Dừng' : '▶ Nghe mẫu'}
             </button>` : ''}
-            ${deleteBtn}
+            ${v.is_custom ? `<button type="button" class="ghost tiny danger-text" title="Bỏ giọng này" onclick="event.preventDefault(); event.stopPropagation(); deleteCustomVoiceCard('${esc(v.voice_id)}')">✕</button>` : ''}
           </div>
         </div>
-        ${v.description ? `<div class="voice-card-desc">${esc(v.description)}</div>` : ""}
-        <div class="voice-card-meta">${badge}</div>
+        ${v.description ? `<div class="voice-card-desc" style="font-size:12px">${esc(v.description)}</div>` : ''}
+        <div class="voice-card-meta">${tagHtml} <span class="muted" style="font-size:11px;margin-left:auto">${esc(v.voice_id.slice(0, 8))}…</span></div>
       </div>
-    </label>`;
+    </div>`;
   }).join("");
-  $$("#qVoiceCards .voice-card").forEach(card => {
-    card.onclick = () => selectVoice(card.dataset.vid);
-  });
 }
 
 let _accountVoicesLoading = false;
 async function loadAccountVoices(refresh = false) {
-  const sel = $("#qAccountVoicesSelect");
   if (_accountVoicesLoading) return;
   _accountVoicesLoading = true;
-  if (sel) sel.innerHTML = `<option value="">— Đang tải danh sách giọng từ ElevenLabs… —</option>`;
 
   try {
     const [accRes, custRes] = await Promise.all([
@@ -1569,136 +1769,123 @@ async function loadAccountVoices(refresh = false) {
 
     if (custRes && custRes.ok) {
       state.customVoices = custRes.voices || [];
-      renderVoiceCards();
     }
 
     if (accRes && accRes.ok && Array.isArray(accRes.voices)) {
       state.accountVoices = accRes.voices;
-      renderAccountVoicesDropdown();
-    } else if (sel) {
-      sel.innerHTML = `<option value="">— Không tải được danh sách giọng (kiểm tra kết nối/khóa API) —</option>`;
+      if (refresh) toast(`Đã đồng bộ ${accRes.voices.length} giọng từ ElevenLabs!`, "good");
     }
+    renderVoiceCards();
+    await updateElevenLabsStatus();
   } catch (e) {
-    if (sel) sel.innerHTML = `<option value="">— Lỗi kết nối ElevenLabs —</option>`;
+    console.warn("loadAccountVoices error:", e);
   } finally {
     _accountVoicesLoading = false;
   }
 }
 
-function renderAccountVoicesDropdown() {
-  const sel = $("#qAccountVoicesSelect");
-  if (!sel) return;
-  const voices = state.accountVoices || [];
-  if (!voices.length) {
-    sel.innerHTML = `<option value="">— Chưa tìm thấy giọng nào trong tài khoản ElevenLabs —</option>`;
-    return;
-  }
-
-  const cloned = voices.filter(v => v.category === "cloned" || v.category === "professional");
-  const generated = voices.filter(v => v.category === "generated");
-  const premade = voices.filter(v => v.category === "premade" || (!cloned.includes(v) && !generated.includes(v)));
-
-  function makeGroup(label, list) {
-    if (!list.length) return "";
-    return `<optgroup label="${label}">${list.map(v => {
-      const isSel = (state.voiceId === v.voice_id);
-      const gender = v.labels?.gender ? ` (${v.labels.gender})` : "";
-      return `<option value="${esc(v.voice_id)}" ${isSel ? 'selected' : ''}>${esc(v.name)}${gender}</option>`;
-    }).join("")}</optgroup>`;
-  }
-
-  let html = `<option value="">— Chọn một giọng từ tài khoản ElevenLabs (${voices.length} giọng) —</option>`;
-  html += makeGroup("👤 Giọng Clone của bạn (Cloned Voices)", cloned);
-  html += makeGroup("✨ Giọng tùy biến (Generated)", generated);
-  html += makeGroup("🗣️ Giọng mẫu có sẵn (Premade)", premade);
-  sel.innerHTML = html;
-
-  if (state.voiceId && voices.some(v => v.voice_id === state.voiceId)) {
-    sel.value = state.voiceId;
-  }
-  onAccountVoiceDropdownChange();
-}
-
-function onAccountVoiceDropdownChange() {
-  const sel = $("#qAccountVoicesSelect");
-  const pBtn = $("#qAccountVoicePreviewBtn");
-  const descEl = $("#qAccountVoiceDesc");
-  if (!sel) return;
-  const vid = sel.value;
-  const v = (state.accountVoices || []).find(x => x.voice_id === vid);
-  if (v) {
-    if (descEl) {
-      const catVi = (v.category === 'cloned') ? 'Giọng Clone' : (v.category === 'premade' ? 'Giọng mẫu' : v.category);
-      const lang = v.labels?.language ? ` · Ngôn ngữ: ${v.labels.language}` : "";
-      descEl.textContent = `${catVi} · ID: ${v.voice_id}${lang}${v.description ? ' — ' + v.description : ''}`;
-    }
-    if (pBtn) {
-      pBtn.style.display = v.preview_url ? "inline-block" : "none";
-    }
-  } else {
-    if (descEl) descEl.textContent = "";
-    if (pBtn) pBtn.style.display = "none";
-  }
-}
-
-function playAccountVoicePreview() {
-  const sel = $("#qAccountVoicesSelect");
-  if (!sel || !sel.value) return;
-  const v = (state.accountVoices || []).find(x => x.voice_id === sel.value);
-  if (!v || !v.preview_url) return toast("Giọng này không có file nghe thử", "warn");
-
-  if (_sampleAudio) {
-    _sampleAudio.pause();
-    _sampleAudio = null;
-  }
-  const pBtn = $("#qAccountVoicePreviewBtn");
-  if (pBtn) pBtn.textContent = "⏸ Dừng";
-  _sampleAudio = new Audio(v.preview_url);
-  _sampleAudio.onended = () => {
-    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
-    _sampleAudio = null;
-  };
-  _sampleAudio.onerror = () => {
-    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
-    _sampleAudio = null;
-    toast("Không phát được file mẫu", "bad");
-  };
-  _sampleAudio.play().catch(() => {
-    if (pBtn) pBtn.textContent = "▶ Nghe mẫu";
-  });
-}
-
-async function applyAccountVoiceSelection() {
-  const sel = $("#qAccountVoicesSelect");
-  if (!sel || !sel.value) return toast("Vui lòng chọn một giọng từ danh sách", "warn");
-  const vid = sel.value;
-  const voice = (state.accountVoices || []).find(v => v.voice_id === vid);
-  if (!voice) return;
-
-  toast(`Đang kết nối giọng "${voice.name}"…`);
+// Live account quota status bar
+async function updateElevenLabsStatus() {
+  const bar = $("#elAccountBar");
+  if (!bar) return;
   try {
-    const res = await api("/api/voices/custom", {
-      method: "POST",
-      body: JSON.stringify({
-        voice_id: voice.voice_id,
-        name: voice.name,
-        category: voice.category,
-        description: voice.description,
-        labels: voice.labels,
-        preview_url: voice.preview_url
-      })
-    });
-    if (res && res.ok) {
-      await loadCustomVoices();
-      await selectVoice(voice.voice_id);
-      toast(`Đã kích hoạt giọng "${voice.name}"!`, "good");
+    const q = await api("/api/elevenlabs/quota");
+    if (q && q.ok) {
+      const used = (q.character_count || 0).toLocaleString();
+      const limit = (q.character_limit || 0).toLocaleString();
+      const remaining = (q.remaining != null ? q.remaining : Math.max(0, (q.character_limit || 0) - (q.character_count || 0))).toLocaleString();
+      const tier = (q.tier || "Pay-as-you-go").toUpperCase();
+      bar.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel2,#1a1a24);border:1px solid var(--border,#333);border-radius:8px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="dot" style="background:#10b981;box-shadow:0 0 6px #10b981"></span>
+            <b style="font-size:13px">ElevenLabs AI</b>
+            <span class="tag good" style="font-size:11px">Gói: ${esc(tier)}</span>
+            <span class="muted" style="font-size:12px">Còn <b>${remaining}</b> / ${limit} ký tự (Đã dùng ${used})</span>
+          </div>
+          <div class="row" style="gap:6px">
+            <button type="button" class="ghost tiny" onclick="loadAccountVoices(true)" title="Đồng bộ lại danh sách giọng từ tài khoản ElevenLabs">🔄 Đồng bộ giọng</button>
+            <button type="button" class="ghost tiny" onclick="promptUpdateElevenLabsKey()" title="Cài đặt hoặc cập nhật API Key">⚙️ Đổi API Key</button>
+          </div>
+        </div>`;
     } else {
-      toast((res && res.error) || "Không thể kích hoạt giọng này", "bad");
+      bar.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel2,#1a1a24);border:1px solid var(--border,#333);border-radius:8px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="dot" style="background:#f59e0b"></span>
+            <b style="font-size:13px">ElevenLabs AI</b>
+            <span class="tag warn" style="font-size:11px">Chưa kết nối hoặc khóa API hết hạn</span>
+          </div>
+          <div class="row">
+            <button type="button" class="primary tiny" onclick="promptUpdateElevenLabsKey()">⚙️ Nhập API Key ElevenLabs</button>
+          </div>
+        </div>`;
     }
   } catch (e) {
-    toast("Lỗi kết nối giọng", "bad");
+    bar.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;background:var(--panel2,#1a1a24);border:1px solid var(--border,#333);border-radius:8px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="dot" style="background:#ef4444"></span>
+          <span class="muted" style="font-size:12px">Không thể kiểm tra tài khoản ElevenLabs</span>
+        </div>
+        <button type="button" class="ghost tiny" onclick="promptUpdateElevenLabsKey()">⚙️ Cài đặt API Key</button>
+      </div>`;
   }
 }
+
+// Modal dialog to quickly update or enter ElevenLabs API Key
+async function promptUpdateElevenLabsKey() {
+  let curKey = "";
+  try {
+    const s = await api("/api/settings/elevenlabs");
+    curKey = s.key_masked || "";
+  } catch (e) {}
+
+  modal(`<h2>⚙️ Cài đặt ElevenLabs API Key</h2>
+    <div class="muted">Kết nối tài khoản ElevenLabs của bạn để đồng bộ toàn bộ giọng đọc và hạn mức tài khoản.</div>
+    <div style="margin-top:14px">
+      <label for="newApiKeyInput" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">ELEVENLABS API KEY</label>
+      <input id="newApiKeyInput" type="password" placeholder="Dán khóa API bắt đầu bằng sk_..." value="" style="width:100%;box-sizing:border-box" autofocus />
+      <div class="hint" style="margin-top:4px;font-size:11px">Khóa hiện tại: ${curKey ? `<span class="mono">${esc(curKey)}</span>` : '<span class="warn">Chưa có khóa</span>'}</div>
+    </div>
+    <div class="actions" style="margin-top:20px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="primary" id="saveApiKeyBtn" onclick="submitUpdateElevenLabsKey()">Lưu & Kết nối</button>
+    </div>`);
+}
+
+async function submitUpdateElevenLabsKey() {
+  const inp = $("#newApiKeyInput");
+  const btn = $("#saveApiKeyBtn");
+  const key = inp ? inp.value.trim() : "";
+  if (!key) return toast("Vui lòng nhập API Key", "warn");
+  if (btn) { btn.disabled = true; btn.textContent = "Đang kết nối…"; }
+  try {
+    const res = await api("/api/settings/elevenlabs", {
+      method: "POST",
+      body: JSON.stringify({ api_key: key })
+    });
+    if (res && res.ok) {
+      toast("Đã cập nhật API Key và kết nối ElevenLabs thành công!", "good");
+      closeModal();
+      await loadAccountVoices(true);
+      await updateElevenLabsStatus();
+      renderVoiceCards();
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = "Lưu & Kết nối"; }
+      toast(res?.error || "Không thể kết nối với API Key này", "bad");
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "Lưu & Kết nối"; }
+    toast("Lỗi kết nối máy chủ", "bad");
+  }
+}
+
+// Stubs for backward compatibility
+function renderAccountVoicesDropdown() {}
+function onAccountVoiceDropdownChange() {}
+function playAccountVoicePreview() {}
+async function applyAccountVoiceSelection() {}
 
 async function submitCustomVoiceInput() {
   const inp = $("#qCustomVoiceInput");
@@ -1940,7 +2127,8 @@ function activeVoiceId() {
 }
 async function renderTest10s() {
   if (!canStartNewWork()) return;
-  const av = $("#qAvatar").value, vid = activeVoiceId(), txt = state.scriptText;
+  const av = ($("#qAvatar") ? $("#qAvatar").value : "") || (state.selectedAvatar ? state.selectedAvatar.avatar_id : "");
+  const vid = activeVoiceId(), txt = state.scriptText;
   if (!av) return toast("Chọn Avatar", "warn");
   if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
@@ -1954,9 +2142,11 @@ async function renderTest10s() {
     if (!state.voiceConfig) return toast("Chưa xác nhận được cấu hình giọng ElevenLabs. Chọn lại giọng rồi thử lại.", "bad");
   }
   $("#qTestBtn").disabled = true;
+  const vName = ($("#qVideoName") ? $("#qVideoName").value.trim() : "") || (state.videoName || "");
+  const testVName = vName ? `[Xem thử 10s] ${vName}` : "";
   const body = state.ttsProvider === "edge"
-    ? { avatar_id: av, voice_id: vid, script_text: txt, tts_provider: "EDGE_TTS_TEST", test_mode: true, test_type: "SCRIPT_PREVIEW", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
-    : { avatar_id: av, voice_id: vid, script_text: txt, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
+    ? { avatar_id: av, voice_id: vid, script_text: txt, video_name: testVName, tts_provider: "EDGE_TTS_TEST", test_mode: true, test_type: "SCRIPT_PREVIEW", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
+    : { avatar_id: av, voice_id: vid, script_text: txt, video_name: testVName, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
   const r = await api("/api/render/test", { method: "POST", body: JSON.stringify(body) });
   $("#qTestBtn").disabled = false;
   if (r.ok) { toast("Đã đưa kiểm tra 10 giây vào hàng đợi", "good"); switchView("history"); }
@@ -1968,7 +2158,8 @@ async function renderFull() {
     const sum = _lastPreflightResult.summary || {};
     return toast(sum.headline || "Chưa đủ điều kiện render. Vui lòng kiểm tra lại bảng điều kiện.", "warn");
   }
-  const av = $("#qAvatar").value, vid = activeVoiceId(), txt = state.scriptText;
+  const av = ($("#qAvatar") ? $("#qAvatar").value : "") || (state.selectedAvatar ? state.selectedAvatar.avatar_id : "");
+  const vid = activeVoiceId(), txt = state.scriptText;
   if (!av) return toast("Chọn Avatar", "warn");
   if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
   if (!txt) return toast("Nhập kịch bản", "warn");
@@ -1980,13 +2171,18 @@ async function renderFull() {
     if (!state.voiceConfig) return toast("Chưa xác nhận được cấu hình giọng ElevenLabs. Chọn lại giọng rồi thử lại.", "bad");
   }
   $("#qRenderBtn").disabled = true;
-  const vName = ($("#qVideoName") ? $("#qVideoName").value.trim() : "") || "";
+  const vName = ($("#qVideoName") ? $("#qVideoName").value.trim() : "") || (state.videoName || "");
   const body = state.ttsProvider === "edge"
     ? { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, video_name: vName, tts_provider: "EDGE_TTS_TEST", voice_meta: { provider: "edge_tts", voice_label: edgeVoiceLabel(vid) } }
     : { avatar_id: av, voice_id: vid, script_text: txt, split_mode: state.splitMode, video_name: vName, voice_meta: state.voiceMeta, tts_config: state.voiceConfig, sync_mode: state.voiceConfig && state.voiceConfig.sync_mode, target_language: state.targetLanguage || "vi" };
   const r = await api("/api/render", { method: "POST", body: JSON.stringify(body) });
   $("#qRenderBtn").disabled = false;
-  if (r.ok) { toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good"); switchView("history"); }
+  if (r.ok) {
+    state.videoName = "";
+    if ($("#qVideoName")) $("#qVideoName").value = "";
+    toast(`Đã xếp hàng (${(r.job_ids || []).length} phần)`, "good");
+    switchView("history");
+  }
   else toast(r.error || "Không xếp hàng được", "bad");
 }
 function edgeVoiceLabel(vid) {
@@ -2144,6 +2340,12 @@ function createRefresh() {
 }
 function createGoto(n) {
   if (n < 1 || n > 5) return;
+  // Prerequisite gating when user navigates forward
+  if (n > state.createStep) {
+    if (n >= 4 && !createState.videoPath && !createState.fileName) {
+      return toast("Vui lòng tải video mẫu lên ở Bước 3 trước.", "warn");
+    }
+  }
   state.createStep = n;
   state.createMax = Math.max(state.createMax, n);
   createRefresh();
@@ -2356,10 +2558,19 @@ async function pollPrep() {
 }
 function usePrepared(aid) {
   const a = state.avatars.find(x => x.avatar_id === aid);
-  if (a && a.ready) { state.selectedAvatar = a; toast(`${aid} đã sẵn sàng — đã chọn`, "good"); }
-  else toast(`${aid} chưa sẵn sàng`, "warn");
+  if (a && a.ready) {
+    state.selectedAvatar = a;
+    ls.set("studio_avatar", aid);
+    toast(`${a.name || aid} đã sẵn sàng — Mời bạn nhập kịch bản`, "good");
+  } else {
+    toast(`${aid} chưa sẵn sàng`, "warn");
+  }
   switchView("quick");
-  setTimeout(() => { const sel = $("#qAvatar"); if (sel) { sel.value = aid; sel.onchange(); } }, 50);
+  setTimeout(() => {
+    const sel = $("#qAvatar");
+    if (sel) { sel.value = aid; sel.onchange(); }
+    quickGoto(2);
+  }, 60);
 }
 
 // --------------------------------------------------------------------------- //
@@ -2403,7 +2614,12 @@ function renderLibGrid() {
   const grid = $("#libGrid"); if (!grid) return;
   let list = [...state.avatars];
   const q = state.libSearch.trim().toLowerCase();
-  if (q) list = list.filter(a => a.avatar_id.toLowerCase().includes(q));
+  if (q) {
+    list = list.filter(a =>
+      (a.avatar_id && a.avatar_id.toLowerCase().includes(q)) ||
+      (a.name && a.name.toLowerCase().includes(q))
+    );
+  }
   const f = state.libFilter;
   if (f !== "all") {
     if (f === "ready") list = list.filter(a => a.ready);
@@ -2412,7 +2628,7 @@ function renderLibGrid() {
   }
   // sort
   if (state.libSort === "quality") list.sort((a, b) => (qMeta(b.quality_status).rank - qMeta(a.quality_status).rank) || (b.ready - a.ready));
-  else if (state.libSort === "name") list.sort((a, b) => a.avatar_id.localeCompare(b.avatar_id));
+  else if (state.libSort === "name") list.sort((a, b) => (a.name || a.avatar_id).localeCompare(b.name || b.avatar_id));
   else if (state.libSort === "newest") list.sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
   // recommended: only a GLOBAL recommendation when ALL ready avatars have real
   // source-quality data. If some ready avatars lack quality data, the best
@@ -2586,10 +2802,15 @@ async function restoreAvatar(aid) {
 function useAvatar(aid) {
   const a = state.avatars.find(x => x.avatar_id === aid);
   if (!a || !a.ready) return toast("AI Avatar chưa sẵn sàng", "warn");
-  state.selectedAvatar = a; ls.set("studio_avatar", aid);
+  state.selectedAvatar = a;
+  ls.set("studio_avatar", aid);
   switchView("quick");
-  setTimeout(() => { const sel = $("#qAvatar"); if (sel) { sel.value = aid; sel.onchange(); } }, 50);
-  toast(`Đã chọn ${aid}`, "good");
+  setTimeout(() => {
+    const sel = $("#qAvatar");
+    if (sel) { sel.value = aid; sel.onchange(); }
+    quickGoto(2);
+  }, 60);
+  toast(`Đã chọn ${a.name || aid} — Mời bạn nhập kịch bản`, "good");
 }
 async function backfillQuality() {
   const btn = $("#libBackfill"); if (btn) { btn.disabled = true; btn.textContent = "Đang đánh giá…"; }
@@ -2602,9 +2823,12 @@ async function backfillQuality() {
 }
 async function showIncompleteDetail(aid) {
   modal(`<h2>${esc(aid)}</h2>
-    <div class="bad-box">AI Avatar này ở trạng thái <b>CHƯA HOÀN TẤT</b> — thiếu dữ liệu cần thiết và chưa thể render.</div>
-    <div class="hint">Trạng thái kỹ thuật tách biệt với chất lượng. Không hiển thị đánh giá chất lượng khi chưa hoàn tất chuẩn bị.</div>
-    <div class="actions"><button class="ghost" onclick="closeModal()">Đóng</button></div>`);
+    <div class="bad-box">AI Avatar này ở trạng thái <b>CHƯA HOÀN TẤT</b> — thiếu dữ liệu khuôn mặt/mặt nạ cần thiết và chưa thể render.</div>
+    <div class="hint" style="margin-top:10px">Bạn có thể xóa avatar chưa hoàn tất này để làm gọn thư viện hoặc tạo lại avatar mới.</div>
+    <div class="actions" style="margin-top:16px">
+      <button class="ghost" onclick="closeModal()">Đóng</button>
+      <button class="danger" onclick="closeModal();confirmDeleteAvatar('${esc(aid)}', '${esc(aid)}')">🗑️ Xóa Avatar này</button>
+    </div>`);
 }
 async function showQualityDetail(aid) {
   modal(`<h2>${esc(aid)}</h2><div class="muted">Đang phân tích video nguồn…</div>`);
@@ -2842,7 +3066,8 @@ function jobCardHTML(j) {
       ${j.status === "complete" ? (
         fileMissing
           ? `<span class="muted" style="font-size:11px;align-self:center;margin-left:4px">Đã dọn dẹp</span>`
-          : `<button class="ghost tiny" onclick="downloadJob('${j.job_id}','${esc(kindLabel)}')">Tải video</button>
+          : `<button class="ghost tiny" onclick="promptExportJob('${j.job_id}',${JSON.stringify(titleText)})" title="Sao chép video trực tiếp vào thư mục trên máy tính">📁 Xuất thư mục</button>
+             <button class="ghost tiny" onclick="downloadJob('${j.job_id}',${JSON.stringify(titleText)})" title="Tải video và chọn thư mục lưu qua Save As">💾 Tải video</button>
              <button class="primary tiny" onclick="playJob('${j.job_id}')">▶ Xem video</button>`
       ) : ""}
     </div>
@@ -2903,6 +3128,7 @@ function copyLogContent() {
 
 // Enhanced Video Player Modal with playback speed controls & shortcuts
 async function playJob(id) {
+  stopAllAudio();
   const j = await api(`/api/render/jobs/${id}`);
   if (!j.output_path || j.file_exists === false) return toast("Tệp video không còn tồn tại trên ổ đĩa (đã được dọn dẹp).", "warn");
   let v = $("#playerModal"); if (v) v.remove();
@@ -2910,7 +3136,7 @@ async function playJob(id) {
   v.className = "modal-bg";
   const title = (j.display_name && j.display_name.trim()) ? j.display_name : (j.script_name || j.kind || "Video");
   const avatar = esc(j.avatar_id || "Avatar");
-  const titleJson = JSON.stringify(j.display_name || "");
+  const titleJson = JSON.stringify(title || "");
 
   v.innerHTML = `<div class="player-modal-card">
     <div style="width:100%;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px">
@@ -2936,8 +3162,10 @@ async function playJob(id) {
       </div>
       <div class="row">
         <button type="button" class="ghost tiny" onclick="event.preventDefault();event.stopPropagation();promptRenameVideo('${esc(j.job_id)}')" title="Đổi tên cho video">✏️ Đổi tên</button>
-        <button type="button" class="ghost tiny" onclick="downloadJob('${j.job_id}',${JSON.stringify(title)})">Tải video</button>
-        <button type="button" class="primary tiny" onclick="closePlayerModal()">Đóng (Esc)</button>
+        ${isLocalhost() ? `<button type="button" class="ghost tiny" onclick="openFolder('${j.job_id}')" title="Mở thư mục chứa video trong Windows Explorer">📂 Mở thư mục</button>` : ''}
+        <button type="button" class="ghost tiny" onclick="promptExportJob('${j.job_id}', ${titleJson})" title="Lưu/Xuất video sang thư mục tuỳ chọn trên máy tính">📁 Xuất thư mục…</button>
+        <button type="button" class="primary tiny" onclick="downloadJob('${j.job_id}', ${titleJson})" title="Tải video và chọn thư mục lưu qua Save As">💾 Tải video</button>
+        <button type="button" class="ghost tiny" onclick="closePlayerModal()">Đóng (Esc)</button>
       </div>
     </div>
     <div class="hint" style="margin-top:8px;font-size:11px">Phím tắt: Space = Play/Pause · ← / → = Tua 5s · Esc = Đóng</div>
@@ -2967,12 +3195,120 @@ async function downloadJob(id, name) {
            : (j.script_name || j.kind || name || "video");
   } catch (e) { /* keep fallback */ }
   const safe = (fname || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 120) || "video";
+  const defaultFilename = `${safe}.mp4`;
+
+  // Modern Chromium Native File System Access API: Windows "Save As" Directory & File Picker
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: defaultFilename,
+        types: [{
+          description: 'Video MP4 (*.mp4)',
+          accept: { 'video/mp4': ['.mp4'] }
+        }]
+      });
+      toast("Đang tải và lưu video vào thư mục bạn chọn…", "info");
+      const resp = await fetch(`/api/render/jobs/${id}/preview`);
+      if (!resp.ok) throw new Error("Không thể tải tệp video từ máy chủ.");
+      const writable = await handle.createWritable();
+      if (resp.body && resp.body.pipeTo) {
+        await resp.body.pipeTo(writable);
+      } else {
+        const blob = await resp.blob();
+        await writable.write(blob);
+        await writable.close();
+      }
+      toast("✅ Đã lưu video thành công vào thư mục đã chọn!", "good");
+      return;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        // User deliberately cancelled the Windows Save dialog
+        return;
+      }
+      console.warn("showSaveFilePicker failed, falling back to standard download:", err);
+    }
+  }
+
+  // Fallback for browsers without showSaveFilePicker
   const a = document.createElement("a");
   a.href = `/api/render/jobs/${id}/preview`;
-  a.download = `${safe}.mp4`;
+  a.download = defaultFilename;
   document.body.appendChild(a); a.click(); a.remove();
+  toast("Đang tải video về máy…", "good");
 }
+
 async function openFolder(id) { await api(`/api/render/jobs/${id}/open-folder`, { method: "POST" }); }
+
+// Export / Copy Video to custom local directory (e.g. G:\My Drive\AI_Avatar_Outputs)
+async function promptExportJob(jobId, defaultName) {
+  let fname = defaultName || "video";
+  try {
+    const j = await api(`/api/render/jobs/${jobId}`);
+    if (j.file_exists === false) return toast("Tệp video không còn tồn tại trên ổ đĩa.", "warn");
+    fname = (j.display_name && j.display_name.trim()) ? j.display_name : (j.script_name || j.kind || defaultName || "video");
+  } catch (e) {}
+
+  const safeName = (fname || "video").replace(/[\\/:*?"<>|]/g, "_").trim().slice(0, 120) || "video";
+  const lastFolder = ls.get("studio_export_dir", "G:\\My Drive\\AI_Avatar_Outputs");
+
+  modal(`<h2>📁 Lưu video sang thư mục máy tính</h2>
+    <div class="muted">Sao chép trực tiếp tệp video sang bất kỳ thư mục nào trên máy (Google Drive, ổ D, Desktop...).</div>
+    <div style="margin-top:14px">
+      <label for="exportFolderInput" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">ĐƯỜNG DẪN THƯ MỤC LƯU TRÊN MÁY</label>
+      <input id="exportFolderInput" value="${esc(lastFolder)}" placeholder="Ví dụ: G:\\My Drive\\AI_Avatar_Outputs hoặc D:\\Videos..." style="width:100%;box-sizing:border-box" autofocus />
+      <div class="row" style="margin-top:6px;gap:6px;flex-wrap:wrap">
+        <span class="muted" style="font-size:11px">Gợi ý nhanh:</span>
+        <button type="button" class="tiny ghost" onclick="$('#exportFolderInput').value='G:\\\\My Drive\\\\AI_Avatar_Outputs'">G:\\My Drive\\AI_Avatar_Outputs</button>
+        <button type="button" class="tiny ghost" onclick="$('#exportFolderInput').value='C:\\\\Users\\\\phuongpn\\\\Desktop'">Desktop</button>
+        <button type="button" class="tiny ghost" onclick="$('#exportFolderInput').value='C:\\\\Users\\\\phuongpn\\\\Downloads'">Downloads</button>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <label for="exportFilenameInput" style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">TÊN TỆP VIDEO (.mp4)</label>
+      <input id="exportFilenameInput" value="${esc(safeName)}.mp4" placeholder="Tên tệp..." maxlength="120" style="width:100%;box-sizing:border-box" />
+    </div>
+    <div style="margin-top:12px">
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="exportOpenFolderCheck" checked />
+        <span>Tự động mở thư mục trong Windows Explorer sau khi lưu xong</span>
+      </label>
+    </div>
+    <div class="actions" style="margin-top:20px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="primary" id="saveExportBtn" onclick="submitExportJob('${esc(jobId)}')">💾 Lưu vào thư mục này</button>
+    </div>`);
+}
+
+async function submitExportJob(jobId) {
+  const folderInput = $("#exportFolderInput");
+  const filenameInput = $("#exportFilenameInput");
+  const openCheck = $("#exportOpenFolderCheck");
+  const btn = $("#saveExportBtn");
+  const folder = folderInput ? folderInput.value.trim() : "";
+  const filename = filenameInput ? filenameInput.value.trim() : "";
+  const openFolder = openCheck ? openCheck.checked : true;
+
+  if (!folder) return toast("Vui lòng nhập đường dẫn thư mục lưu.", "warn");
+  if (btn) { btn.disabled = true; btn.textContent = "Đang lưu…"; }
+
+  try {
+    const res = await api(`/api/render/jobs/${jobId}/export-to-folder`, {
+      method: "POST",
+      body: JSON.stringify({ folder, filename, open_folder: openFolder })
+    });
+    if (res && res.ok) {
+      ls.set("studio_export_dir", folder);
+      closeModal();
+      toast(`✅ Đã lưu video thành công vào: ${res.dest_path}`, "good");
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = "💾 Lưu vào thư mục này"; }
+      toast(res?.error || "Không thể lưu vào thư mục này.", "bad");
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Lưu vào thư mục này"; }
+    toast("Lỗi kết nối máy chủ khi sao chép video.", "bad");
+  }
+}
 
 // V1.6.1 — Video Rename via clean Modal Dialog with explicit Confirm / Cancel.
 async function promptRenameVideo(jobId) {
@@ -3295,107 +3631,79 @@ async function renderSettings() {
   } catch (e) {}
 
   const activeModel = settingsData.model_id || el_model_id();
-  const currentVoiceId = settingsData.voice_id || s.elevenlabs_voice_id || "N0Z0aL8qHhzwUHwRBcVo";
-  const currentMaxChars = settingsData.max_text_chars || s.tts_max_text_chars || 4800;
   const isConnected = settingsData.connected ?? s.elevenlabs_connected;
   const keyMasked = settingsData.key_masked || s.elevenlabs_key_masked || "—";
-
-  const MODEL_OPTIONS = [
-    { id: "eleven_v4", name: "⭐ Eleven v4 (Mới nhất · Biểu cảm chân thực nhất)" },
-    { id: "eleven_v4_turbo", name: "⚡ Eleven v4 Turbo (Độ trễ siêu thấp ~100ms)" },
-    { id: "eleven_v3", name: "Eleven v3 (Chuẩn đàm thoại tự nhiên)" },
-    { id: "eleven_v3_conversational", name: "Eleven v3 Conversational (Giao tiếp hội thoại)" },
-    { id: "eleven_multilingual_v2", name: "Eleven Multilingual v2 (Đa ngôn ngữ ổn định)" },
-    { id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5 (Tối ưu tốc độ)" },
-    { id: "eleven_flash_v2_5", name: "Eleven Flash v2.5 (Siêu tốc ~75ms)" },
-  ];
 
   let profilesHtml = "";
   if (profilesData && profilesData.length > 0) {
     profilesHtml = `
-      <div class="card">
-        <h2>Hồ sơ giọng nói đã lưu (Voice Profiles)</h2>
-        <div class="hint" style="margin-bottom:12px">Danh sách các giọng đọc đã được liên kết model riêng. Bạn có thể chuyển model hoặc xóa để sử dụng model mặc định.</div>
-        <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:13px">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border);text-align:left">
-                <th style="padding:8px">Voice ID</th>
-                <th style="padding:8px">Ngôn ngữ</th>
-                <th style="padding:8px">Model hiện tại</th>
-                <th style="padding:8px">Nguồn</th>
-                <th style="padding:8px;text-align:right">Thao tác</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${profilesData.map(p => `
-                <tr style="border-bottom:1px solid var(--border2,#333)">
-                  <td style="padding:8px;font-family:var(--mono)">${esc(p.voice_id)}</td>
-                  <td style="padding:8px"><span class="tag">${esc(p.language_code || "vi")}</span></td>
-                  <td style="padding:8px"><b style="color:var(--accent,#4f8cff)">${esc(p.preferred_model_id)}</b></td>
-                  <td style="padding:8px" class="muted">${esc(p.selection_source || "—")}</td>
-                  <td style="padding:8px;text-align:right">
-                    ${p.preferred_model_id !== 'eleven_v4' ? `<button class="ghost tiny" onclick="switchProfileToV4('${esc(p.voice_id)}', '${esc(p.language_code)}')">Dùng v4</button>` : ''}
-                    <button class="danger tiny" onclick="deleteVoiceProfileRow('${esc(p.voice_id)}', '${esc(p.language_code)}')">Xóa</button>
-                  </td>
+      <details class="tech" style="margin-bottom:16px">
+        <summary>Hồ sơ mô hình đã lưu theo giọng (${profilesData.length})</summary>
+        <div class="card" style="margin-top:8px">
+          <div class="hint" style="margin-bottom:12px">Danh sách các giọng đọc đã được liên kết model riêng.</div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:13px">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border);text-align:left">
+                  <th style="padding:8px">Voice ID</th>
+                  <th style="padding:8px">Ngôn ngữ</th>
+                  <th style="padding:8px">Model hiện tại</th>
+                  <th style="padding:8px">Nguồn</th>
+                  <th style="padding:8px;text-align:right">Thao tác</th>
                 </tr>
-              `).join('')}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                ${profilesData.map(p => `
+                  <tr style="border-bottom:1px solid var(--border2,#333)">
+                    <td style="padding:8px;font-family:var(--mono)">${esc(p.voice_id)}</td>
+                    <td style="padding:8px"><span class="tag">${esc(p.language_code || "vi")}</span></td>
+                    <td style="padding:8px"><b style="color:var(--accent,#4f8cff)">${esc(p.preferred_model_id)}</b></td>
+                    <td style="padding:8px" class="muted">${esc(p.selection_source || "—")}</td>
+                    <td style="padding:8px;text-align:right">
+                      <button class="danger tiny" onclick="deleteVoiceProfileRow('${esc(p.voice_id)}', '${esc(p.language_code)}')">Xóa</button>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      </details>
     `;
   }
 
-  el.innerHTML = `<h1 class="view-title">Cài đặt & Cấu hình</h1>
-    <p class="view-sub">Quản lý kết nối giọng AI (ElevenLabs), mô hình thế hệ mới và cấu hình hệ thống.</p>
+  el.innerHTML = `<h1 class="view-title">Cài đặt & Tài khoản</h1>
+    <p class="view-sub">Quản lý khóa API ElevenLabs, kiểm tra hạn mức Quota và thông tin hệ thống.</p>
 
     <div class="card">
-      <h2>Cấu hình giọng đọc ElevenLabs (AI Voice)</h2>
+      <h2>Tài khoản & API ElevenLabs (AI Voice)</h2>
       <div class="kv"><span class="k">Trạng thái kết nối</span><span class="v">${isConnected ? '<span style="color:var(--good)">● Đã kết nối API</span>' : '<span style="color:var(--bad)">● Chưa kết nối API</span>'}</span></div>
       <div class="kv"><span class="k">Khóa API hiện tại</span><span class="v" id="sCurrentKey">${esc(keyMasked)}</span></div>
-      <div class="kv"><span class="k">Model hiện đang áp dụng</span><span class="v"><b style="color:var(--accent,#4f8cff)">${esc(activeModel)}</b></span></div>
       <div id="quotaRow" class="kv"><span class="k">Hạn mức tài khoản (Quota)</span><span class="v muted">đang kiểm tra…</span></div>
 
       <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px">
-        <h3 style="font-size:14px;margin-bottom:12px;font-weight:600">Tùy chỉnh thông số ElevenLabs</h3>
+        <h3 style="font-size:14px;margin-bottom:12px;font-weight:600">Cập nhật API Key mới</h3>
         
         <div style="margin-bottom:14px">
-          <label style="font-weight:600;display:block;margin-bottom:6px">1. Model AI Voice mặc định:</label>
-          <select id="sModelSelect" style="width:100%;max-width:550px">
-            ${MODEL_OPTIONS.map(m => `<option value="${m.id}" ${activeModel === m.id ? 'selected' : ''}>${esc(m.name)}</option>`).join('')}
-          </select>
-          <div class="hint">Khuyến nghị: <b>Eleven v4</b> (chất lượng lồng tiếng cao nhất và cảm xúc tự nhiên).</div>
-          <label style="display:flex;align-items:center;gap:8px;margin-top:8px;cursor:pointer;font-size:13px">
-            <input type="checkbox" id="sSyncProfiles" checked />
-            <span>Đồng bộ model đã chọn cho các hồ sơ giọng đã lưu</span>
-          </label>
-        </div>
-
-        <div style="margin-bottom:14px">
-          <label style="font-weight:600;display:block;margin-bottom:6px">2. Voice ID mặc định:</label>
-          <input id="sVoiceId" type="text" value="${esc(currentVoiceId)}" placeholder="Voice ID từ ElevenLabs" style="max-width:550px" />
-          <div class="hint">Voice ID mặc định dùng khi tạo video mới hoặc kiểm tra giọng.</div>
-        </div>
-
-        <div style="margin-bottom:14px">
-          <label style="font-weight:600;display:block;margin-bottom:6px">3. Giới hạn ký tự mỗi lượt đọc:</label>
-          <input id="sMaxChars" type="number" step="100" min="500" max="40000" value="${currentMaxChars}" placeholder="4800" style="max-width:200px" />
-          <div class="hint">Số ký tự tối đa cho mỗi lần đọc TTS (mặc định: 4800 ký tự).</div>
-        </div>
-
-        <div style="margin-bottom:14px">
-          <label style="font-weight:600;display:block;margin-bottom:6px">4. Cập nhật API Key mới (để trống nếu không đổi):</label>
+          <label style="font-weight:600;display:block;margin-bottom:6px">Khóa API ElevenLabs mới (để trống nếu không đổi):</label>
           <div class="row" style="max-width:550px">
-            <input id="sKey" type="password" placeholder="Nhập API key ElevenLabs mới" style="flex:1" />
+            <input id="sKey" type="password" placeholder="Nhập mã sk_... từ ElevenLabs" style="flex:1" />
             <button type="button" class="ghost tiny" onclick="togglePasswordVisibility('sKey')">Hiện/Ẩn</button>
           </div>
-          <div class="hint">Khóa API được lưu an toàn trong tệp .env nội bộ trên máy.</div>
+          <div class="hint">Khóa API được lưu an toàn trong tệp .env nội bộ trên máy tính.</div>
         </div>
 
         <div class="actions" style="margin-top:18px">
-          <button class="primary" onclick="saveElevenLabsSettings()">💾 Lưu Cấu Hình</button>
-          <button class="ghost" onclick="checkQuotaManual()">🔄 Kiểm Tra Quota</button>
+          <button class="primary" onclick="saveElevenLabsSettings()">💾 Cập Nhật API Key</button>
+          <button class="ghost" onclick="checkQuotaManual()">🔄 Kiểm Tra Quota Ngay</button>
+        </div>
+      </div>
+
+      <div style="margin-top:20px;background:var(--panel2,#1a1a24);border:1px dashed var(--border,#333);border-radius:8px;padding:14px 16px;font-size:13px;display:flex;align-items:flex-start;gap:12px">
+        <span style="font-size:24px;line-height:1">🎙️</span>
+        <div style="line-height:1.6">
+          <b style="color:var(--text,#eee)">Lựa chọn giọng đọc AI (Voice Selection):</b><br/>
+          Toàn bộ danh sách 27+ giọng đọc (Tiếng Việt 🇻🇳, Giọng cá nhân / Clone, Nam, Nữ), tính năng <b>Nghe mẫu miễn phí</b> và <b>Nghe thử kịch bản</b> được thiết kế trực tiếp tại <b>Bước 3 (Lồng tiếng AI)</b> trong quy trình <b>Tạo video</b> để bạn chọn linh hoạt theo từng video.
         </div>
       </div>
     </div>
@@ -3432,11 +3740,6 @@ async function renderSettings() {
       </div>
     </details>`;
 
-  const smEl = $("#sModelSelect");
-  if (smEl) {
-    initModelDropdown(smEl, activeModel);
-  }
-
   checkQuotaManual(true);
 }
 
@@ -3449,31 +3752,25 @@ function togglePasswordVisibility(id) {
 }
 
 async function saveElevenLabsSettings() {
-  const model = ($("#sModelSelect") && $("#sModelSelect").value.trim()) || "";
-  const voice = ($("#sVoiceId") && $("#sVoiceId").value.trim()) || "";
-  const maxChars = parseInt($("#sMaxChars") && $("#sMaxChars").value) || null;
   const key = ($("#sKey") && $("#sKey").value.trim()) || "";
-  const syncProfiles = $("#sSyncProfiles") ? $("#sSyncProfiles").checked : false;
 
-  const payload = { sync_profiles: syncProfiles };
-  if (model) payload.model_id = model;
-  if (voice) payload.voice_id = voice;
-  if (maxChars) payload.max_text_chars = maxChars;
-  if (key) payload.api_key = key;
+  if (!key) {
+    return toast("Vui lòng nhập API Key mới để cập nhật", "warn");
+  }
 
-  toast("Đang lưu cấu hình…");
+  toast("Đang lưu API Key mới…");
   const r = await api("/api/settings/elevenlabs", {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ api_key: key })
   });
 
   if (r.ok) {
-    toast("Đã lưu cấu hình ElevenLabs thành công! (Lưu vào .env và kích hoạt ngay)", "good");
+    toast("Đã cập nhật API Key ElevenLabs thành công!", "good");
     if ($("#sKey")) $("#sKey").value = "";
     await loadStatus();
     renderSettings();
   } else {
-    toast(r.error || "Lỗi lưu cấu hình", "bad");
+    toast(r.error || "Lỗi lưu API Key", "bad");
   }
 }
 

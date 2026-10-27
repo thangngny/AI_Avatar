@@ -1,112 +1,126 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Net;
+using System.Net.Sockets;
 using System.Threading;
-using System.Windows.Forms;
 
 namespace AIAvatarStudio
 {
-    static class Launcher
+    class Program
     {
-        [STAThread]
         static void Main(string[] args)
         {
-            string url = "http://127.0.0.1:8078";
-            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            Console.Title = "AI Avatar Studio NextGen V2 (RTX 5090 Blackwell)";
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-            // Auto-create Desktop Shortcut on first run
-            EnsureDesktopShortcut(baseDir);
-
-            // Check if server is already running
-            if (!IsServerRunning(url))
+            string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            string[] pythonCandidates = new string[]
             {
-                string pythonPath = FindPython(baseDir);
-                if (string.IsNullOrEmpty(pythonPath))
-                {
-                    MessageBox.Show(
-                        "Không tìm thấy môi trường Python AI (runtime\\venv).\n\n" +
-                        "Vui lòng đảm bảo thư mục runtime\\venv đã được cài đặt đúng đường dẫn.",
-                        "AI Avatar Studio - Thiếu Runtime",
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning
-                    );
-                    return;
-                }
+                @"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe",
+                Path.GetFullPath(Path.Combine(appDir, @"..\runtime_avatar_v2\Scripts\python.exe")),
+                @"C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe",
+                Path.GetFullPath(Path.Combine(appDir, @"runtime\venv\Scripts\python.exe"))
+            };
 
-                // Start Studio server in background
-                ProcessStartInfo psi = new ProcessStartInfo();
-                psi.FileName = pythonPath;
-                psi.Arguments = "run_studio.py --no-browser --port 8078";
-                psi.WorkingDirectory = baseDir;
-                psi.UseShellExecute = false;
-                psi.CreateNoWindow = true; // Silently runs in background
-                try
+            string pythonExe = null;
+            foreach (var cand in pythonCandidates)
+            {
+                if (File.Exists(cand))
                 {
-                    Process.Start(psi);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show("Lỗi khởi động Studio: " + ex.Message, "Lỗi", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                    return;
-                }
-
-                // Wait for server to be responsive
-                bool ready = false;
-                for (int i = 0; i < 30; i++)
-                {
-                    Thread.Sleep(500);
-                    if (IsServerRunning(url))
-                    {
-                        ready = true;
-                        break;
-                    }
-                }
-
-                if (!ready)
-                {
-                    MessageBox.Show("Studio đang khởi động chậm. Hệ thống sẽ mở giao diện ngay bây giờ.", "Thông báo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    pythonExe = cand;
+                    break;
                 }
             }
 
-            // Launch browser in app mode
-            OpenInAppMode(url);
-        }
+            if (string.IsNullOrEmpty(pythonExe))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("=====================================================================");
+                Console.WriteLine(" [LỖI] Không tìm thấy môi trường Python AI Avatar Studio!");
+                Console.WriteLine(" Đã kiểm tra các đường dẫn:");
+                foreach (var c in pythonCandidates) Console.WriteLine("   - " + c);
+                Console.WriteLine(" Vui lòng kiểm tra lại thư mục runtime_avatar_v2.");
+                Console.WriteLine("=====================================================================");
+                Console.ResetColor();
+                Console.WriteLine("\nNhấn phím bất kỳ để thoát...");
+                Console.ReadKey();
+                return;
+            }
 
-        static void EnsureDesktopShortcut(string baseDir)
-        {
+            string host = "127.0.0.1";
+            int port = 8178;
+            string url = "http://" + host + ":" + port + "/";
+
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("=====================================================================");
+            Console.WriteLine("  AI AVATAR STUDIO NEXTGEN V2 (RTX 5090 BLACKWELL EDITION)");
+            Console.WriteLine("  Phiên bản: SOTA Multi-Band Laplacian Pyramid & Dental Enamel");
+            Console.WriteLine("  Địa chỉ:   " + url);
+            Console.WriteLine("  Runtime:   " + pythonExe);
+            Console.WriteLine("=====================================================================");
+            Console.ResetColor();
+
+            // Check if server is already running on port 8178
+            bool alreadyRunning = IsPortOpen(host, port);
+            if (alreadyRunning)
+            {
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine("\n[THÔNG BÁO] Máy chủ Studio V2 đang chạy ngầm trên cổng " + port + "!");
+                Console.WriteLine("Đang mở giao diện trên trình duyệt web...");
+                Console.ResetColor();
+                OpenBrowser(url);
+                Console.WriteLine("\nBạn có thể đóng cửa sổ này hoặc nhấn phím bất kỳ để kết thúc.");
+                Thread.Sleep(2000);
+                return;
+            }
+
+            // Launch browser after slight delay
+            new Thread(() =>
+            {
+                Thread.Sleep(1500);
+                OpenBrowser(url);
+            }).Start();
+
+            // Start run_studio.py
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = pythonExe,
+                Arguments = "run_studio.py --host " + host + " --port " + port,
+                WorkingDirectory = appDir,
+                UseShellExecute = false,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
+                CreateNoWindow = false
+            };
+
             try
             {
-                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                string lnkPath = Path.Combine(desktop, "AI Avatar Studio NextGen.lnk");
-                string exePath = Path.Combine(baseDir, "AI_Avatar_NextGen.exe");
-                if (!File.Exists(lnkPath) && File.Exists(exePath))
+                using (Process proc = Process.Start(psi))
                 {
-                    Type shellType = Type.GetTypeFromProgID("WScript.Shell");
-                    if (shellType != null)
-                    {
-                        dynamic shell = Activator.CreateInstance(shellType);
-                        dynamic sc = shell.CreateShortcut(lnkPath);
-                        sc.TargetPath = exePath;
-                        sc.WorkingDirectory = baseDir;
-                        sc.Description = "AI Avatar Studio NextGen (RTX 5090 Blackwell Edition)";
-                        sc.Save();
-                    }
+                    proc.WaitForExit();
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine("[LỖI KHỞI CHẠY] " + ex.Message);
+                Console.ResetColor();
+                Console.WriteLine("\nNhấn phím bất kỳ để thoát...");
+                Console.ReadKey();
+            }
         }
 
-        static bool IsServerRunning(string url)
+        static bool IsPortOpen(string host, int port)
         {
             try
             {
-                HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url + "/api/system/status");
-                req.Timeout = 800;
-                req.Method = "GET";
-                using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
+                using (TcpClient client = new TcpClient())
                 {
-                    return res.StatusCode == HttpStatusCode.OK;
+                    IAsyncResult result = client.BeginConnect(host, port, null, null);
+                    bool success = result.AsyncWaitHandle.WaitOne(1000);
+                    if (!success) return false;
+                    client.EndConnect(result);
+                    return true;
                 }
             }
             catch
@@ -115,60 +129,15 @@ namespace AIAvatarStudio
             }
         }
 
-        static string FindPython(string baseDir)
+        static void OpenBrowser(string url)
         {
-            string[] candidates = new string[]
-            {
-                Path.Combine(baseDir, @"..\runtime_nextgen\venv\Scripts\python.exe"),
-                Path.Combine(baseDir, @"..\runtime\venv\Scripts\python.exe"),
-                @"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
-                @"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
-                Path.Combine(baseDir, @"runtime\venv\Scripts\python.exe")
-            };
-
-            foreach (string p in candidates)
-            {
-                try
-                {
-                    string full = Path.GetFullPath(p);
-                    if (File.Exists(full)) return full;
-                }
-                catch { }
-            }
-            return null;
-        }
-
-        static void OpenInAppMode(string url)
-        {
-            string[] browsers = new string[]
-            {
-                @"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                @"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Google\Chrome\Application\chrome.exe"),
-                @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                @"C:\Program Files\Microsoft\Edge\Application\msedge.exe"
-            };
-
-            foreach (string b in browsers)
-            {
-                if (File.Exists(b))
-                {
-                    try
-                    {
-                        ProcessStartInfo psi = new ProcessStartInfo();
-                        psi.FileName = b;
-                        psi.Arguments = "--app=" + url + " --window-size=1440,900";
-                        Process.Start(psi);
-                        return;
-                    }
-                    catch { }
-                }
-            }
-
-            // Fallback default browser
             try
             {
-                Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
             }
             catch { }
         }

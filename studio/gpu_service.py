@@ -17,6 +17,7 @@ from . import config
 _LOCK = threading.Lock()
 _GPUS: List[Dict[str, Any]] = []        # [{id, name, memory_total_mib}]
 _BUSY_COUNTS: Dict[int, int] = {}       # gpu id -> count of actively running jobs
+_JOB_TO_GPU: Dict[str, int] = {}         # job_id -> gpu_id
 
 
 def _query_gpus() -> List[Dict[str, Any]]:
@@ -57,14 +58,16 @@ def detect() -> List[Dict[str, Any]]:
 
 def max_slots_for_gpu(gpu: Dict[str, Any]) -> int:
     """Determine safe concurrent render slots for this GPU.
-    RTX 5090 (32GB GDDR7) can host 2 concurrent streams (~15.5GB each).
-    GPUs < 30GB host 1 stream. Overridable via STUDIO_SLOTS_PER_GPU."""
+    Production Hardening: Full-HD 1080p MuseTalk with CUDA Graph requires ~15.5 GB VRAM.
+    To guarantee 100% stability against VRAM exhaustion, prevent CUDA Graph capture
+    collisions, and eliminate timeouts when users open multiple tabs, we serialize
+    renders to 1 concurrent slot per physical GPU. Additional jobs from multiple tabs
+    are safely placed in the FIFO queue and executed sequentially at full speed (>26 FPS).
+    Overridable via STUDIO_SLOTS_PER_GPU for experimental multi-stream setups.
+    """
     env_override = os.getenv("STUDIO_SLOTS_PER_GPU", "").strip()
     if env_override.isdigit():
         return max(1, int(env_override))
-    mem_mib = gpu.get("memory_total_mib", 0)
-    if mem_mib >= 30000:  # 32 GB class (e.g. RTX 5090)
-        return 2
     return 1
 
 
@@ -98,7 +101,7 @@ def status() -> List[Dict[str, Any]]:
     return out
 
 
-def acquire() -> Optional[int]:
+def acquire(job_id: Optional[str] = None) -> Optional[int]:
     """Acquire an available GPU slot for a job.
     Returns the gpu id (e.g. 0), or None if all slots on all GPUs are saturated."""
     gpus = detect()
@@ -108,6 +111,8 @@ def acquire() -> Optional[int]:
             if _BUSY_COUNTS.get(0, 0) >= 1:
                 return None
             _BUSY_COUNTS[0] = _BUSY_COUNTS.get(0, 0) + 1
+            if job_id:
+                _JOB_TO_GPU[job_id] = 0
             return 0
 
         for g in gpus:
@@ -116,14 +121,25 @@ def acquire() -> Optional[int]:
             current_active = _BUSY_COUNTS.get(gid, 0)
             if current_active < slots:
                 _BUSY_COUNTS[gid] = current_active + 1
+                if job_id:
+                    _JOB_TO_GPU[job_id] = gid
                 return gid
         return None
 
 
-def release(gpu_id: int) -> None:
-    """Release an active slot on the specified GPU."""
+def release(target: Any) -> None:
+    """Release an active slot on the specified GPU or for a specific job_id (idempotent)."""
     with _LOCK:
-        if gpu_id in _BUSY_COUNTS:
-            _BUSY_COUNTS[gpu_id] = max(0, _BUSY_COUNTS[gpu_id] - 1)
-            if _BUSY_COUNTS[gpu_id] == 0:
-                del _BUSY_COUNTS[gpu_id]
+        gid = None
+        if isinstance(target, str):
+            gid = _JOB_TO_GPU.pop(target, None)
+        elif isinstance(target, int):
+            gid = target
+            for jid, g in list(_JOB_TO_GPU.items()):
+                if g == gid:
+                    del _JOB_TO_GPU[jid]
+                    break
+        if gid is not None and gid in _BUSY_COUNTS:
+            _BUSY_COUNTS[gid] = max(0, _BUSY_COUNTS[gid] - 1)
+            if _BUSY_COUNTS[gid] == 0:
+                del _BUSY_COUNTS[gid]

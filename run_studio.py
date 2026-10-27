@@ -24,7 +24,7 @@ from studio import config, db, render_service  # noqa: E402
 from studio import runtime_guard  # noqa: E402
 
 
-def _startup_hardening(port: int) -> bool:
+def _startup_hardening(port: int, no_browser: bool = False) -> str:
     """V1.6.0 runtime/deployment hardening, run BEFORE the server binds.
 
     1. Canonical-interpreter enforcement (missing -> STOP; wrong -> warn +
@@ -75,11 +75,12 @@ def _startup_hardening(port: int) -> bool:
         print("  Runtime: %s" % (m.get("interpreter") or "?"))
         print("  Started: %s" % started_s)
         print("  No duplicate server spawned. Open http://127.0.0.1:%s/" % port)
-        try:
-            import webbrowser
-            webbrowser.open("http://127.0.0.1:%s/" % port)
-        except Exception:
-            pass
+        if not no_browser:
+            try:
+                import webbrowser
+                webbrowser.open("http://127.0.0.1:%s/" % port)
+            except Exception:
+                pass
         return "already_running"
     if action == "unknown_owner":
         print("=" * 56)
@@ -114,16 +115,17 @@ def main():
     ap.add_argument("--no-browser", action="store_true", help="Do not open a browser")
     args = ap.parse_args()
 
-    config.ensure_runtime_dirs()
-    db.init_db()
-    render_service.start()
-
-    # V1.6.0 hardening: canonical runtime + single-instance + manifest, BEFORE bind.
-    action = _startup_hardening(args.port)
+    # V1.6.0 hardening: canonical runtime + single-instance + manifest, BEFORE starting any services or binding.
+    action = _startup_hardening(args.port, no_browser=args.no_browser)
     if action == "already_running":
         sys.exit(0)
     if action != "proceed":
         sys.exit(1)
+
+    config.ensure_runtime_dirs()
+    db.init_db()
+    render_service.start()
+
 
     from studio.app import app
     url = f"http://{args.host}:{args.port}/"

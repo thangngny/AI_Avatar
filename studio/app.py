@@ -1377,6 +1377,7 @@ def render_test():
     gate = _enforce_render_voice_allowlist(data)
     if gate:
         return jsonify(gate[0]), gate[1]
+    video_name = data.get("video_name") or data.get("name") or data.get("display_name")
     return jsonify(render_service.create_test_job(
         data.get("avatar_id", ""), data.get("voice_id", ""),
         data.get("script_text", ""), data.get("voice_meta"),
@@ -1385,7 +1386,8 @@ def render_test():
         test_type=data.get("test_type"),
         tts_config=data.get("tts_config"),
         sync_mode=data.get("sync_mode"),
-        target_language=data.get("target_language")))
+        target_language=data.get("target_language"),
+        video_name=video_name))
 
 
 @app.route("/api/render/mouth-test", methods=["POST"])
@@ -1795,6 +1797,55 @@ def render_open_folder(job_id):
     return jsonify({"ok": True})
 
 
+@app.route("/api/render/jobs/<job_id>/export-to-folder", methods=["POST"])
+def render_export_to_folder(job_id):
+    """Export/copy a rendered video directly to a user-specified folder on local disk."""
+    import shutil
+    safe_id = _sanitize_filename(job_id)
+    j = db.get_job(safe_id)
+    if not j or not j.get("output_path"):
+        return jsonify({"ok": False, "error": "Không tìm thấy video."}), 404
+    src_path = j["output_path"]
+    if not os.path.isfile(src_path):
+        return jsonify({"ok": False, "error": "Tệp video nguồn không tồn tại trên ổ đĩa."}), 404
+
+    data = request.get_json(silent=True) or {}
+    dest_dir = (data.get("folder") or "").strip()
+    custom_name = (data.get("filename") or "").strip()
+    if not dest_dir:
+        return jsonify({"ok": False, "error": "Vui lòng nhập đường dẫn thư mục lưu."}), 400
+
+    try:
+        dest_dir_norm = os.path.normpath(dest_dir)
+        os.makedirs(dest_dir_norm, exist_ok=True)
+        if not os.path.isdir(dest_dir_norm):
+            return jsonify({"ok": False, "error": "Đường dẫn không phải là thư mục hợp lệ."}), 400
+
+        fname = custom_name or (j.get("display_name") or j.get("script_name") or j.get("kind") or "video")
+        safe_fname = re.sub(r'[\\/:*?"<>|]', '_', fname).strip()[:120] or "video"
+        if not safe_fname.lower().endswith(".mp4"):
+            safe_fname += ".mp4"
+
+        target_path = os.path.join(dest_dir_norm, safe_fname)
+        shutil.copy2(src_path, target_path)
+
+        open_folder = data.get("open_folder", True)
+        if open_folder and os.name == "nt":
+            try:
+                subprocess.Popen(["explorer", "/select,", os.path.normpath(target_path)])
+            except Exception:
+                pass
+
+        return jsonify({
+            "ok": True,
+            "dest_path": target_path,
+            "filename": safe_fname,
+            "folder": dest_dir_norm
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Lỗi sao chép tệp: {str(e)}"}), 500
+
+
 @app.route("/api/render/jobs/<job_id>/delete", methods=["POST"])
 def render_delete_route(job_id):
     safe_id = _sanitize_filename(job_id)
@@ -1807,20 +1858,44 @@ def render_delete_route(job_id):
 @app.route("/api/render/jobs/<job_id>/rename", methods=["POST"])
 def render_rename_route(job_id):
     """V1.6.1 — set a user-facing video name for a completed render.
-    Body: {"name": "..."}. Empty/whitespace reverts to the auto label."""
+    Body: {"name": "..."}. Empty/whitespace reverts to the auto label.
+    Also renames the physical .mp4 file on disk so the file on the computer matches the chosen name."""
     safe_id = _sanitize_filename(job_id)
     data = request.get_json(silent=True) or {}
     raw = data.get("name")
     if raw is not None and not isinstance(raw, str):
         return jsonify({"ok": False, "error": "Tên không hợp lệ."}), 400
-    if not db.get_job(safe_id):
+    job = db.get_job(safe_id)
+    if not job:
         return jsonify({"ok": False, "error": "Không tìm thấy video."}), 404
     ok = db.rename_job(safe_id, raw)
     if not ok:
         return jsonify({"ok": False, "error": "Không cập nhật được tên."}), 500
+
+    clean_name = (raw or "").strip()
+    old_path = job.get("output_path")
+    if clean_name and old_path and os.path.isfile(old_path) and job.get("status") == "complete":
+        try:
+            dir_name = os.path.dirname(old_path)
+            safe_fname = re.sub(r'[\\/:*?"<>|]', '_', clean_name).strip()[:100]
+            if not safe_fname.lower().endswith(".mp4"):
+                safe_fname += ".mp4"
+            new_path = os.path.join(dir_name, safe_fname)
+            if os.path.normpath(new_path) != os.path.normpath(old_path):
+                n = 2
+                base_stem, ext = os.path.splitext(safe_fname)
+                while os.path.exists(new_path):
+                    new_path = os.path.join(dir_name, f"{base_stem}_{n}{ext}")
+                    n += 1
+                os.rename(old_path, new_path)
+                db.update_job(safe_id, output_path=new_path)
+        except Exception:
+            pass
+
     updated = db.get_job(safe_id)
     return jsonify({"ok": True, "job_id": safe_id,
-                    "display_name": updated.get("display_name")})
+                    "display_name": updated.get("display_name"),
+                    "output_path": updated.get("output_path")})
 
 
 @app.route("/api/render/jobs/<job_id>/restore", methods=["POST"])

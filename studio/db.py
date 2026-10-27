@@ -264,8 +264,9 @@ def create_job(job: Dict[str, Any]) -> None:
                        tts_provider, test_mode, test_type, edge_voice,
                        mouth_state_auto, mouth_state_user, mouth_state_provenance,
                        tts_config, tts_config_hash, sync_mode, history_item_id,
+                       display_name,
                        is_deleted, deleted_at, audio_source, preview_id, preview_fingerprint)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     job["job_id"], _now(), _now(), job["kind"], job["avatar_id"],
                     job["voice_id"], job.get("voice_meta"), job.get("script_text"),
@@ -282,6 +283,7 @@ def create_job(job: Dict[str, Any]) -> None:
                     job.get("mouth_state_provenance"),
                     job.get("tts_config"), job.get("tts_config_hash"),
                     job.get("sync_mode"), job.get("history_item_id"),
+                    job.get("display_name"),
                     job.get("is_deleted", 0), job.get("deleted_at"),
                     job.get("audio_source", "generated"), job.get("preview_id"),
                     job.get("preview_fingerprint"),
