@@ -20,7 +20,7 @@ OUT_DIR = os.path.join(REPO_ROOT, "reports", "mission06", "blend_eval")
 os.makedirs(OUT_DIR, exist_ok=True)
 HANDOVER_DIR = r"D:\CongThang_AI_Avatar\v2_renders\V6_FINAL_ACCEPTANCE"
 
-GFPGAN_CKPT = r"C:\Users\phuongpn\AI_Avatar\models\GFPGANv1.4.pth"
+GFPGAN_CKPT = r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\models\GFPGANv1.4.pth"
 
 
 def load_gfpgan():

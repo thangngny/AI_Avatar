@@ -299,7 +299,7 @@ def test_expressive_motion_jerk(video_path: str):
 
 def main():
     video_path = r"D:\CongThang_AI_Avatar\renders\demo_sota_crystal_sharp_25fps.mp4"
-    audio_path = r"C:\Users\phuongpn\AI_Avatar_NextGen\renders\demo_elevenlabs_16k.wav"
+    audio_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "demo_elevenlabs_16k.wav")
     
     print("=" * 70)
     print("NEXTGEN AI AVATAR -- 5-DIMENSION DEEP QUALITY AUDIT SUITE")

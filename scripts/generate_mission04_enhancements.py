@@ -46,7 +46,7 @@ def load_gfpgan():
         narrow=1,
         sft_half=True
     )
-    ckpt_path = r"C:\Users\phuongpn\AI_Avatar\models\GFPGANv1.4.pth"
+    ckpt_path = r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\models\GFPGANv1.4.pth"
     ckpt = torch.load(ckpt_path, map_location="cpu")
     sd = ckpt.get("params_ema", ckpt.get("params", ckpt))
     model.load_state_dict(sd, strict=False)

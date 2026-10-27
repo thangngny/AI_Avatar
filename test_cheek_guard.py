@@ -2,15 +2,15 @@ import cv2
 import numpy as np
 import pickle
 
-orig = cv2.imread(r"C:\Users\phuongpn\AI_Avatar\data\avatars\doTrang_closeup\full_imgs\00000075.png")
+orig = cv2.imread(r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\data\avatars\doTrang_closeup\full_imgs\00000075.png")
 
 cap = cv2.VideoCapture(r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\reports\doTrang_photoreal_enamel_10s.mp4")
 cap.set(cv2.CAP_PROP_POS_FRAMES, 75)
 _, gen_frame = cap.read()
 cap.release()
 
-mask = cv2.imread(r"C:\Users\phuongpn\AI_Avatar\data\avatars\doTrang_closeup\mask\00000075.png", cv2.IMREAD_GRAYSCALE)
-with open(r"C:\Users\phuongpn\AI_Avatar\data\avatars\doTrang_closeup\mask_coords.pkl", "rb") as f:
+mask = cv2.imread(r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\data\avatars\doTrang_closeup\mask\00000075.png", cv2.IMREAD_GRAYSCALE)
+with open(r"C:\Users\phuongpn\AI_Avatar_NextGen_V2\data\avatars\doTrang_closeup\mask_coords.pkl", "rb") as f:
     mc = pickle.load(f)[75]
 y_s, x_s, y_e, x_e = mc
 

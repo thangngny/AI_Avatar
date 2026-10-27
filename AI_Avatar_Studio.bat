@@ -7,7 +7,6 @@ setlocal
 
 set "STUDIO_PY=C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe"
 if not exist "%STUDIO_PY%" set "STUDIO_PY=%~dp0..\runtime_avatar_v2\Scripts\python.exe"
-if not exist "%STUDIO_PY%" set "STUDIO_PY=C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe"
 
 set "PORT=8178"
 set "HOST=127.0.0.1"

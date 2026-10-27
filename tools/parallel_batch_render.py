@@ -13,7 +13,7 @@ import argparse
 import subprocess
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-PYTHON_BIN = os.path.join(r"C:\Users\phuongpn\runtime_nextgen\venv\Scripts", "python.exe")
+PYTHON_BIN = os.path.join(r"C:\Users\phuongpn\runtime_avatar_v2\Scripts", "python.exe")
 SCRIPT_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "generate_video_from_script.py")
 GDRIVE_DEST = r"G:\My Drive\AI_Avatar_Outputs\NextGen_RTX5090_Demos"
 
@@ -70,7 +70,7 @@ def main():
     parser.add_argument("--no_expressive", action="store_true", help="Disable audio-driven expressive motion")
     args = parser.parse_args()
 
-    audio_src = os.path.join(r"C:\Users\phuongpn\AI_Avatar_NextGen\renders", "demo_elevenlabs_16k.wav")
+    audio_src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "demo_elevenlabs_16k.wav")
     if not os.path.isfile(audio_src):
         print(f"Audio source not found: {audio_src}")
         sys.exit(1)

@@ -17,7 +17,7 @@ PYTHON_BIN = r"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe"
 SOULX_ENG_DIR = os.path.join(REPO_ROOT, "engines", "soulx_flashhead")
 WEIGHTS_DIR = os.path.join(REPO_ROOT, "weights", "SoulX-FlashHead-1_3B")
 WAV2VEC_DIR = os.path.join(REPO_ROOT, "weights", "wav2vec2-base-960h")
-GFPGAN_CKPT = r"C:\Users\phuongpn\AI_Avatar\models\GFPGANv1.4.pth"
+GFPGAN_CKPT = os.path.join(REPO_ROOT, "models", "GFPGANv1.4.pth")
 
 sys.path.insert(0, os.path.join(REPO_ROOT, "avatars"))
 try:
