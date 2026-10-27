@@ -202,7 +202,7 @@ def main():
         print(f"  ✓ Tiêu đề trang web: \"{title}\"")
         assert "AI Avatar Studio" in title, f"Unexpected title: {title}"
         
-        screenshot_path = "C:/Users/phuongpn/AI_Avatar/studio_e2e_verified.png"
+        screenshot_path = os.path.join(ROOT, "studio_e2e_verified.png")
         page.screenshot(path=screenshot_path)
         print(f"  ✓ Đã chụp ảnh giao diện Studio trực tiếp: {screenshot_path}")
         browser.close()
