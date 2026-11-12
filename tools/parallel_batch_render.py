@@ -75,7 +75,7 @@ def main():
         print(f"Audio source not found: {audio_src}")
         sys.exit(1)
 
-    out_dir = r"D:\CongThang_AI_Avatar\renders"
+    out_dir = r"D:\PhuongPN\renders"
     os.makedirs(out_dir, exist_ok=True)
 
     use_expressive = not args.no_expressive

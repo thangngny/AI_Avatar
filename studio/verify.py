@@ -14,34 +14,56 @@ from typing import Dict, Any, Optional
 from . import config
 
 
-def _ffprobe(path: str) -> Optional[Dict[str, Any]]:
-    # Resolve a ffprobe executable (V1.4.1 R15 fix — the old fallback called
-    # imageio_ffmpeg.get_ffprobe_exe which does not exist). Resolution order:
-    #   1. ffprobe on PATH
-    #   2. FFPROBE_PATH env var
-    #   3. ffprobe next to imageio-ffmpeg's bundled ffmpeg
-    # If none is available, returns None — verify() then reports an honest
-    # failure instead of fabricating success from file size alone.
-    candidates = ["ffprobe", "ffprobe.exe"]
+from typing import List
+
+
+def _candidate_ffprobes() -> List[str]:
+    """Return an ordered list of ffprobe candidates."""
+    candidates = []
     env_p = os.environ.get("FFPROBE_PATH", "").strip()
     if env_p:
         candidates.append(env_p)
+
+    import shutil as _sh
+    which_ff = _sh.which("ffprobe")
+    if which_ff and which_ff not in candidates:
+        candidates.append(which_ff)
+    which_ff_exe = _sh.which("ffprobe.exe")
+    if which_ff_exe and which_ff_exe not in candidates:
+        candidates.append(which_ff_exe)
+
+    # Known Windows user directories
+    local_bin = os.path.expanduser("~/.local/bin/ffprobe.exe")
+    if os.path.isfile(local_bin) and local_bin not in candidates:
+        candidates.append(local_bin)
+
     try:
         import imageio_ffmpeg
         ff = imageio_ffmpeg.get_ffmpeg_exe()
-        # imageio-ffmpeg ships ffmpeg; a sibling ffprobe may exist.
         sib = os.path.join(os.path.dirname(ff), "ffprobe.exe")
-        if os.path.isfile(sib):
+        if os.path.isfile(sib) and sib not in candidates:
             candidates.append(sib)
     except Exception:
         pass
-    for exe in candidates:
+
+    for fallback in ("ffprobe", "ffprobe.exe"):
+        if fallback not in candidates:
+            candidates.append(fallback)
+    return candidates
+
+
+def _ffprobe(path: str) -> Optional[Dict[str, Any]]:
+    # Resolve a ffprobe executable (V1.4.1 R15 fix).
+    # Encoding MUST be utf-8 with errors='replace' to prevent Windows cp1252
+    # UnicodeDecodeError crashes when inspecting files with Vietnamese or Unicode filenames/metadata.
+    for exe in _candidate_ffprobes():
         try:
             r = subprocess.run(
                 [exe, "-v", "error", "-print_format", "json",
                  "-show_format", "-show_streams", path],
-                capture_output=True, text=True, timeout=60)
-        except FileNotFoundError:
+                capture_output=True, text=True,
+                encoding="utf-8", errors="replace", timeout=60)
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
             continue
         if r.returncode == 0 and r.stdout:
             try:
@@ -54,20 +76,8 @@ def _ffprobe(path: str) -> Optional[Dict[str, Any]]:
 def ffprobe_resolved() -> Optional[str]:
     """Return the ffprobe executable path that would be used, or None.
     (V1.4.1 R15 — for preflight/reporting without running a probe.)"""
-    candidates = ["ffprobe", "ffprobe.exe"]
-    env_p = os.environ.get("FFPROBE_PATH", "").strip()
-    if env_p:
-        candidates.append(env_p)
-    try:
-        import imageio_ffmpeg
-        ff = imageio_ffmpeg.get_ffmpeg_exe()
-        sib = os.path.join(os.path.dirname(ff), "ffprobe.exe")
-        if os.path.isfile(sib):
-            candidates.append(sib)
-    except Exception:
-        pass
     import shutil as _sh
-    for exe in candidates:
+    for exe in _candidate_ffprobes():
         if os.path.isfile(exe):
             return exe
         found = _sh.which(exe)

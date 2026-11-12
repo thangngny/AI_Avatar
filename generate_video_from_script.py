@@ -404,8 +404,10 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
         '-movflags', '+faststart',
         temp_video_path,
     ]
+    ffmpeg_err_log = temp_video_path + ".ffmpeg.log"
+    ffmpeg_err_file = open(ffmpeg_err_log, "w", encoding="utf-8")
     pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE,
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            stdout=subprocess.DEVNULL, stderr=ffmpeg_err_file,
                             bufsize=16*1024*1024)
 
     import time as _time
@@ -474,12 +476,26 @@ def render_video(audio_path, avatar_data, model, output_path, fps=25, batch_size
             for f in batch_frames:
                 pipe.stdin.write(f.tobytes())
                 frames_done += 1
+            if pipe.poll() is not None:
+                ffmpeg_err_file.close()
+                err_content = ""
+                if os.path.exists(ffmpeg_err_log):
+                    with open(ffmpeg_err_log, "r", encoding="utf-8", errors="replace") as ef:
+                        err_content = ef.read().strip()
+                raise RuntimeError(f"FFmpeg encoder exited prematurely with code {pipe.returncode}: {err_content}")
+            torch.cuda.synchronize()
     finally:
         try:
             pipe.stdin.close()
         except Exception:
             pass
         pipe.wait()
+        try:
+            ffmpeg_err_file.close()
+            if pipe.returncode == 0 and os.path.exists(ffmpeg_err_log):
+                os.remove(ffmpeg_err_log)
+        except Exception:
+            pass
 
     elapsed = _time.perf_counter() - render_start
     print(f'Render done: {frames_done} frames in {elapsed:.1f}s = {frames_done/elapsed:.1f} fps')
@@ -577,10 +593,10 @@ def main():
                              'audio track. If omitted, the final audio is muxed from --audio '
                              '(16kHz conditioning) — legacy behavior. MuseTalk conditioning '
                              'always uses the 16kHz --audio.')
-    parser.add_argument('--output', default=os.path.join('D:\\', 'CongThang_AI_Avatar', 'renders', 'output.mp4'))
+    parser.add_argument('--output', default=os.path.join('D:\\', 'PhuongPN', 'renders', 'output.mp4'))
     parser.add_argument('--voice', default='vi-VN-HoaiMyNeural',
                         help='EdgeTTS voice (convenience; NOT part of the render truth)')
-    parser.add_argument('--batch_size', type=int, default=48, help='Batch size for UNet/VAE inference (NextGen RTX 5090 default 48)')
+    parser.add_argument('--batch_size', type=int, default=24, help='Batch size for UNet/VAE inference (NextGen RTX 5090 safe default 24)')
     parser.add_argument('--smooth_60fps', action='store_true', help='NextGen 60 FPS cinema motion smoothing')
     parser.add_argument('--expressive_motion', action='store_true', help='Audio-driven prosodic head nodding & gaze dynamics')
     parser.add_argument('--split_by', choices=['line','sentence','all'], default='sentence')

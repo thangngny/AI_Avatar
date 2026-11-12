@@ -547,7 +547,7 @@ async function renderQuick() {
           </div>
           <div class="actions">
             <button class="ghost" onclick="quickGoto(4)">Quay lại</button>
-            <button class="primary big" id="qRenderBtn" onclick="renderFull()">TẠO VIDEO</button>
+            <button class="primary big" id="qRenderBtn" onclick="confirmRenderFull()">TẠO VIDEO</button>
             <span class="muted" style="font-size:12px;align-self:center">(Phím tắt: Ctrl+Enter)</span>
           </div>
         </div>
@@ -1776,7 +1776,7 @@ async function loadAccountVoices(refresh = false) {
       if (refresh) toast(`Đã đồng bộ ${accRes.voices.length} giọng từ ElevenLabs!`, "good");
     }
     renderVoiceCards();
-    await updateElevenLabsStatus();
+    await updateElevenLabsStatus(refresh);
   } catch (e) {
     console.warn("loadAccountVoices error:", e);
   } finally {
@@ -1785,11 +1785,11 @@ async function loadAccountVoices(refresh = false) {
 }
 
 // Live account quota status bar
-async function updateElevenLabsStatus() {
+async function updateElevenLabsStatus(refresh = false) {
   const bar = $("#elAccountBar");
   if (!bar) return;
   try {
-    const q = await api("/api/elevenlabs/quota");
+    const q = await api(`/api/elevenlabs/quota${refresh ? "?refresh=1" : ""}`);
     if (q && q.ok) {
       const used = (q.character_count || 0).toLocaleString();
       const limit = (q.character_limit || 0).toLocaleString();
@@ -1911,7 +1911,16 @@ async function submitCustomVoiceInput() {
   }
 }
 
-async function deleteCustomVoiceCard(vid) {
+function confirmDeleteCustomVoice(vid, name) {
+  modal(`<h2>Xóa giọng tùy chỉnh?</h2>
+    <div class="warn-box">Giọng đọc <b>"${esc(name || vid)}"</b> (<span class="mono">${esc(vid)}</span>) sẽ bị xóa khỏi danh sách giọng cá nhân của bạn.</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="danger" onclick="closeModal(); executeDeleteCustomVoiceCard('${esc(vid)}')">Xác nhận Xóa</button>
+    </div>`);
+}
+
+async function executeDeleteCustomVoiceCard(vid) {
   if (!vid) return;
   try {
     await api(`/api/voices/custom/${encodeURIComponent(vid)}`, { method: "DELETE" });
@@ -1922,8 +1931,12 @@ async function deleteCustomVoiceCard(vid) {
     }
     await loadCustomVoices();
     renderVoiceCards();
-    toast("Đã bỏ giọng tùy chỉnh khỏi danh sách", "good");
+    toast("Đã xóa giọng tùy chỉnh khỏi danh sách", "good");
   } catch (e) {}
+}
+
+async function deleteCustomVoiceCard(vid) {
+  confirmDeleteCustomVoice(vid, vid);
 }
 
 function isScriptPreviewStale() {
@@ -2152,6 +2165,48 @@ async function renderTest10s() {
   if (r.ok) { toast("Đã đưa kiểm tra 10 giây vào hàng đợi", "good"); switchView("history"); }
   else toast(r.error || "Không xếp hàng được", "bad");
 }
+function confirmRenderFull() {
+  if (!canStartNewWork()) return;
+  if (_lastPreflightResult && !_lastPreflightResult.can_render) {
+    const sum = _lastPreflightResult.summary || {};
+    return toast(sum.headline || "Chưa đủ điều kiện render. Vui lòng kiểm tra lại bảng điều kiện.", "warn");
+  }
+  const av = ($("#qAvatar") ? $("#qAvatar").value : "") || (state.selectedAvatar ? state.selectedAvatar.avatar_id : "");
+  const vid = activeVoiceId(), txt = state.scriptText;
+  if (!av) return toast("Chọn Avatar", "warn");
+  if (!vid) return toast(state.ttsProvider === "edge" ? "Chọn giọng test" : "Nhập Voice ID", "warn");
+  if (!txt) return toast("Nhập kịch bản", "warn");
+
+  const vName = ($("#qVideoName") ? $("#qVideoName").value.trim() : "") || (state.videoName || "Video mới");
+  const avObj = (state.avatars || []).find(x => x.avatar_id === av);
+  const avName = avObj ? (avObj.name || avObj.avatar_id) : av;
+  const wordCount = (txt.trim().split(/\s+/).filter(Boolean)).length;
+  const charCount = txt.length;
+  const voiceDisp = state.ttsProvider === "edge" ? edgeVoiceLabel(vid) : (state.voiceMeta ? (state.voiceMeta.name || vid) : vid);
+  const splitText = state.splitMode === "line" ? "Theo từng dòng" : state.splitMode === "sentence" ? "Theo từng câu" : "Toàn bộ thành 1 video duy nhất";
+
+  modal(`<h2>Xác nhận tạo Video</h2>
+    <div class="info-box">
+      <div style="font-weight:600;font-size:15px;margin-bottom:8px">Thông số tác vụ render sắp thực hiện:</div>
+      <div style="line-height:1.75">
+        • <b>Tên video:</b> <span class="mono">${esc(vName)}</span><br/>
+        • <b>AI Avatar:</b> ${esc(avName)} (<span class="mono">${esc(av)}</span>)<br/>
+        • <b>Giọng đọc:</b> ${esc(voiceDisp)} (${state.ttsProvider === "edge" ? "EdgeTTS Miễn phí" : "ElevenLabs"})<br/>
+        • <b>Độ dài kịch bản:</b> ${wordCount} từ (${charCount} ký tự)<br/>
+        • <b>Chế độ tách:</b> ${esc(splitText)}
+      </div>
+    </div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Xem lại kịch bản</button>
+      <button type="button" class="primary" id="confirmExecRenderBtn" onclick="executeRenderFull()">Bắt đầu Render</button>
+    </div>`);
+}
+
+function executeRenderFull() {
+  closeModal();
+  renderFull();
+}
+
 async function renderFull() {
   if (!canStartNewWork()) return;
   if (_lastPreflightResult && !_lastPreflightResult.can_render) {
@@ -2518,12 +2573,40 @@ function showPrepare() {
     <input id="cName" placeholder="vd: my_avatar" value="${esc((d.face_h_ratio||0) >= 0.16 ? "closeup" : "avatar")}" />
     <div class="qhint" style="margin:8px 0">Đặt tên ngắn gọn để dễ tìm kiếm trong thư viện.</div>
     <div class="actions">
-      <button class="primary big" id="cPrepBtn" onclick="prepareAvatar()">TẠO AVATAR</button>
+      <button class="primary big" id="cPrepBtn" onclick="confirmPrepareAvatar()">TẠO AVATAR</button>
     </div>
     <div id="cPrepProgress"></div>
   </div>`;
   createGoto(5);
 }
+function confirmPrepareAvatar() {
+  const name = $("#cName") ? $("#cName").value.trim() : "";
+  if (!name) return toast("Nhập tên AI Avatar", "warn");
+  const q = createState.quality || {};
+  const warnCount = (q.warnings || []).length;
+  const warnSummary = warnCount > 0 ? `<div class="warn-box" style="margin-top:10px">Video có ${warnCount} cảnh báo chất lượng. Hệ thống sẽ tự động tối ưu hóa khi trích xuất.</div>` : "";
+
+  modal(`<h2>Xác nhận tạo AI Avatar</h2>
+    <div class="info-box">
+      <div style="font-weight:600;font-size:15px;margin-bottom:8px">Thông tin Avatar chuẩn bị tạo:</div>
+      <div style="line-height:1.75">
+        • <b>Tên hiển thị:</b> <span class="mono">${esc(name)}</span><br/>
+        • <b>Tác vụ xử lý:</b> Tách khung hình, nhận diện khuôn mặt, trích xuất khẩu hình và tạo mặt nạ BiSeNet.<br/>
+        • <b>Thời gian dự kiến:</b> Khoảng 1–3 phút xử lý trực tiếp trên GPU RTX 5090.
+      </div>
+      ${warnSummary}
+    </div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Xem lại</button>
+      <button type="button" class="primary" id="confirmExecPrepBtn" onclick="executePrepareAvatar()">Bắt đầu tạo Avatar</button>
+    </div>`);
+}
+
+function executePrepareAvatar() {
+  closeModal();
+  prepareAvatar();
+}
+
 async function prepareAvatar() {
   const name = $("#cName").value.trim();
   if (!name) return toast("Nhập tên AI Avatar", "warn");
@@ -2580,8 +2663,16 @@ async function renderLibrary() {
   const avs = state.avatars;
   const ready = avs.filter(a => a.ready).length;
   el.innerHTML = `
-    <h1 class="view-title">Thư viện Avatar</h1>
-    <p class="view-sub">${ready} Avatar sẵn sàng</p>
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+      <div>
+        <h1 class="view-title" style="margin-bottom:4px">Thư viện Avatar</h1>
+        <p class="view-sub" style="margin:0">${ready} Avatar sẵn sàng</p>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="ghost" onclick="switchView('trash')" title="Xem các Avatar và video đã xóa tạm thời">🗑️ Xem Thùng rác</button>
+        <button class="primary" onclick="switchView('create')">＋ Tạo Avatar mới</button>
+      </div>
+    </div>
     <div class="lib-controls">
       <input id="libSearch" placeholder="Tìm Avatar…" value="${esc(state.libSearch)}" />
       <select id="libSort">
@@ -2678,7 +2769,7 @@ function libraryCardHTML(a, recommended, recKind) {
   const detailBtn = a.ready ? `<button class="ghost" onclick="showQualityDetail('${esc(a.avatar_id)}')">Xem chi tiết</button>`
     : `<button class="ghost" onclick="showIncompleteDetail('${esc(a.avatar_id)}')">Xem chi tiết</button>`;
   const menuBtn = `<div class="ac-menu-wrap">
-    <button class="ghost tiny ac-menu-btn" onclick="toggleAcMenu('${esc(a.avatar_id)}', event)" title="Tùy chọn quản lý">⋯</button>
+    <button class="ghost tiny ac-menu-btn" onclick="toggleAcMenu('${esc(a.avatar_id)}', event)" title="Tùy chọn quản lý: Đổi tên, Xóa Avatar">⚙️ Quản lý ▾</button>
     <div class="ac-dropdown" id="acMenu_${esc(a.avatar_id)}">
       <button class="ac-dropdown-item" onclick="promptRenameAvatar('${esc(a.avatar_id)}', '${esc(a.name || a.avatar_id)}')">✏️ Đổi tên</button>
       <button class="ac-dropdown-item danger-item" onclick="confirmDeleteAvatar('${esc(a.avatar_id)}', '${esc(a.name || a.avatar_id)}')">🗑 Xóa Avatar</button>
@@ -2691,7 +2782,7 @@ function libraryCardHTML(a, recommended, recKind) {
   const nameHTML = dispName
     ? `<div class="ac-name">${esc(dispName)}</div><div class="ac-id">${esc(a.avatar_id)}</div>`
     : `<div class="ac-name">${esc(a.avatar_id)}</div>`;
-  return `<div class="avatar-card ${a.ready ? "" : "incomplete"}">
+  return `<div class="avatar-card ${a.ready ? "" : "incomplete"}" data-avatar-id="${esc(a.avatar_id)}">
     <div class="ac-thumb">
       <img src="/api/avatars/${esc(a.avatar_id)}/thumbnail" onerror="this.style.opacity=.25" />
       ${rec}
@@ -2747,7 +2838,7 @@ async function submitRenameAvatar(aid) {
     closeModal();
     toast(`Đã đổi tên Avatar thành "${val}"`, "good");
     await loadAvatars();
-    if (state.view === "library") renderLibrary();
+    if (state.view === "library") renderLibGrid();
   } else {
     if (btn) btn.disabled = false;
     toast(r.error || "Không đổi tên được Avatar", "bad");
@@ -2768,13 +2859,22 @@ function confirmDeleteAvatar(aid, dispName) {
 async function executeDeleteAvatar(aid) {
   const btn = $("#delAvBtn");
   if (btn) btn.disabled = true;
-  const r = await api(`/api/avatars/${aid}/delete`, { method: "POST" });
   closeModal();
+  const card = document.querySelector(`.avatar-card[data-avatar-id="${aid}"]`);
+  if (card) {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "scale(0.92)";
+  }
+  const r = await api(`/api/avatars/${aid}/delete`, { method: "POST" });
   if (r.ok) {
     await loadAvatars();
-    if (state.view === "library") renderLibrary();
+    if (state.view === "library") {
+      setTimeout(() => renderLibGrid(), 200);
+    }
     toastWithUndo(`Đã chuyển Avatar "${aid}" vào Thùng rác`, () => restoreAvatar(aid));
   } else if (r.conflict) {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
     modal(`<h2>Không thể xóa Avatar</h2>
       <div class="bad-box">${esc(r.error || "Avatar đang được sử dụng.")}</div>
       <div class="hint" style="margin-top:10px">Các tác vụ đang liên kết: ${(r.active_jobs || []).join(", ") || "Đang chạy"}</div>
@@ -2788,13 +2888,22 @@ async function executeDeleteAvatar(aid) {
 }
 
 async function restoreAvatar(aid) {
+  const card = document.querySelector(`.avatar-card[data-avatar-id="${aid}"]`);
+  if (card && state.view === "trash") {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "scale(0.92)";
+  }
   const r = await api(`/api/avatars/${aid}/restore`, { method: "POST" });
   if (r.ok) {
     toast(`Đã khôi phục Avatar "${aid}" thành công.`, "good");
     await loadAvatars();
-    if (state.view === "library") renderLibrary();
-    if (state.view === "trash") renderTrash();
+    if (state.view === "library") renderLibGrid();
+    if (state.view === "trash") {
+      setTimeout(() => loadTrashContent(), 200);
+    }
   } else {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
     toast(r.error || "Không khôi phục được Avatar.", "bad");
   }
 }
@@ -2819,7 +2928,7 @@ async function backfillQuality() {
   await loadAvatars();
   if (btn) { btn.disabled = false; btn.textContent = "Đánh giá tất cả"; }
   toast(`Đã đánh giá ${(r.results || []).length} avatar`, "good");
-  renderLibrary();
+  renderLibGrid();
 }
 async function showIncompleteDetail(aid) {
   modal(`<h2>${esc(aid)}</h2>
@@ -2918,8 +3027,14 @@ function closeModal() { const m = $("#modal"); if (m) m.remove(); }
 // RENDER HISTORY — visual cards, TEST vs VIDEO HOÀN CHỈNH
 async function renderHistory() {
   const el = $("#content");
-  el.innerHTML = `<h1 class="view-title">Lịch sử video</h1>
-    <p class="view-sub">Danh sách các video đã tạo.</p>
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:12px">
+      <div>
+        <h1 class="view-title" style="margin-bottom:4px">Lịch sử video</h1>
+        <p class="view-sub" style="margin:0">Danh sách các video đã tạo.</p>
+      </div>
+      <button class="ghost" onclick="switchView('trash')" title="Xem các Avatar và video đã xóa tạm thời">🗑️ Xem Thùng rác</button>
+    </div>
     <div class="history-controls">
       <input id="jobSearch" placeholder="Tìm theo tên Avatar, kịch bản, tên video…" value="${esc(state.historySearch || '')}" />
     </div>
@@ -2989,14 +3104,14 @@ function jobCardHTML(j) {
   // it would do nothing useful, so hide it there (spec V1.3.1 §16).
   if (j.status === "complete") {
     actions = `${(isLocalhost() && !fileMissing) ? `<button class="ghost tiny" onclick="openFolder('${j.job_id}')">Mở thư mục</button>` : ""}
-      <button class="ghost tiny danger-text" onclick="deleteJob('${j.job_id}')" title="Chuyển video vào Thùng rác">Xóa</button>`;
+      <button class="ghost tiny danger-text" onclick="confirmDeleteJob('${j.job_id}', '${esc(j.display_name || j.script_name || j.kind || 'Video')}')" title="Chuyển video vào Thùng rác">Xóa</button>`;
   } else if (["failed","cancelled","timed_out"].includes(j.status)) {
     actions = `<button class="ghost tiny" onclick="retryJob('${j.job_id}')">Thử lại</button>
-      <button class="ghost tiny danger-text" onclick="deleteJob('${j.job_id}')" title="Chuyển vào Thùng rác">Xóa</button>`;
+      <button class="ghost tiny danger-text" onclick="confirmDeleteJob('${j.job_id}', '${esc(j.display_name || j.script_name || j.kind || 'Video')}')" title="Chuyển vào Thùng rác">Xóa</button>`;
   } else if (j.status === "queued") {
-    actions = `<button class="danger tiny" onclick="cancelJob('${j.job_id}')">Hủy tác vụ</button>`;
+    actions = `<button class="danger tiny" onclick="confirmStopJob('${j.job_id}', false)">Hủy tác vụ</button>`;
   } else if (j.status !== "complete") {
-    actions = `<button class="danger tiny" onclick="confirmStopJob('${j.job_id}')">Dừng render</button>`;
+    actions = `<button class="danger tiny" onclick="confirmStopJob('${j.job_id}', true)">Dừng render</button>`;
   }
   
   // Log viewer button for any job (running, failed, or complete)
@@ -3407,19 +3522,20 @@ async function cancelJob(id) {
   refreshQueue();
 }
 
-function confirmStopJob(jobId) {
-  modal(`<h2>Dừng tác vụ render?</h2>
-    <div class="bad-box">Tác vụ đang chạy sẽ bị dừng ngay lập tức. Dữ liệu render dở dang sẽ bị hủy bỏ.</div>
-    <div class="hint" style="margin-top:12px">Bạn có thể chọn Thử lại sau từ Lịch sử render bất cứ lúc nào.</div>
+function confirmStopJob(jobId, isRunning) {
+  const isRun = isRunning !== false;
+  modal(`<h2>${isRun ? "Dừng tác vụ render đang chạy?" : "Hủy tác vụ trong hàng đợi?"}</h2>
+    <div class="bad-box">${isRun ? "Tác vụ đang render bằng GPU sẽ bị dừng ngay lập tức. Dữ liệu render dở dang sẽ bị hủy bỏ." : "Tác vụ đang chờ sẽ được rút khỏi hàng đợi render."}</div>
+    <div class="hint" style="margin-top:12px">Bạn có thể chọn Thử lại sau từ Lịch sử video bất cứ lúc nào.</div>
     <div class="actions" style="margin-top:16px">
-      <button class="ghost" onclick="closeModal()">Tiếp tục render</button>
-      <button class="danger" onclick="executeStopJob('${esc(jobId)}')">Dừng render</button>
+      <button type="button" class="ghost" onclick="closeModal()">Giữ lại tác vụ</button>
+      <button type="button" class="danger" onclick="executeStopJob('${esc(jobId)}')">${isRun ? "Xác nhận Dừng" : "Xác nhận Hủy"}</button>
     </div>`);
 }
 
 async function executeStopJob(jobId) {
   closeModal();
-  toast("Đang dừng tiến trình render…", "warn");
+  toast("Đang dừng tác vụ render…", "warn");
   const r = await api(`/api/render/jobs/${jobId}/cancel`, { method: "POST" });
   if (r.ok) {
     toast("Đã dừng tác vụ render thành công.", "good");
@@ -3431,23 +3547,57 @@ async function executeStopJob(jobId) {
   }
 }
 
+function confirmDeleteJob(jobId, title) {
+  const cleanTitle = title || jobId;
+  modal(`<h2>Xóa video render?</h2>
+    <div class="warn-box">Video <b>"${esc(cleanTitle)}"</b> sẽ được chuyển vào <b>Thùng rác</b>.<br/><br/>
+    Tệp video gốc trên đĩa không bị mất và bạn có thể khôi phục lại bất kỳ lúc nào từ Thùng rác.</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="danger" id="delJobBtn" onclick="executeDeleteJob('${esc(jobId)}')">Xác nhận Xóa</button>
+    </div>`);
+}
+
+async function executeDeleteJob(jobId) {
+  const btn = $("#delJobBtn");
+  if (btn) btn.disabled = true;
+  closeModal();
+  deleteJob(jobId);
+}
+
 async function deleteJob(jobId) {
+  const card = document.querySelector(`.job[data-job="${jobId}"]`);
+  if (card) {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "translateX(16px)";
+  }
   const r = await api(`/api/render/jobs/${jobId}/delete`, { method: "POST" });
   if (r.ok) {
-    refreshJobs();
+    setTimeout(() => refreshJobs(), 200);
     toastWithUndo("Đã chuyển video vào Thùng rác", () => restoreJob(jobId));
   } else {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
     toast(r.error || "Không xóa được video.", "bad");
   }
 }
 
 async function restoreJob(jobId) {
+  const card = document.querySelector(`.job[data-job="${jobId}"]`);
+  if (card && state.view === "trash") {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "scale(0.92)";
+  }
   const r = await api(`/api/render/jobs/${jobId}/restore`, { method: "POST" });
   if (r.ok) {
     toast("Đã khôi phục video thành công.", "good");
     refreshJobs();
-    if (state.view === "trash") renderTrash();
+    if (state.view === "trash") {
+      setTimeout(() => loadTrashContent(), 200);
+    }
   } else {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
     toast(r.error || "Không khôi phục được video.", "bad");
   }
 }
@@ -3455,10 +3605,122 @@ async function restoreJob(jobId) {
 // --------------------------------------------------------------------------- //
 // TRASH VIEW
 // --------------------------------------------------------------------------- //
+function confirmPurgeAvatar(aid, dispName) {
+  modal(`<h2>Xóa vĩnh viễn AI Avatar?</h2>
+    <div class="bad-box">Avatar <b>"${esc(dispName || aid)}"</b> và toàn bộ tệp khuôn mặt/mặt nạ trên đĩa cứng sẽ bị <b>xóa vĩnh viễn</b> để giải phóng dung lượng.<br/><br/>
+    Hành động này <b>KHÔNG THỂ HOÀN TÁC</b>!</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="danger" onclick="executePurgeAvatar('${esc(aid)}')">Xác nhận Xóa vĩnh viễn</button>
+    </div>`);
+}
+
+async function executePurgeAvatar(aid) {
+  closeModal();
+  const card = document.querySelector(`.avatar-card[data-avatar-id="${aid}"]`);
+  if (card) {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "scale(0.92)";
+  }
+  toast("Đang xóa vĩnh viễn Avatar…", "warn");
+  const r = await api(`/api/avatars/${aid}/purge`, { method: "POST" });
+  if (r.ok) {
+    toast(`Đã xóa vĩnh viễn Avatar "${aid}" khỏi hệ thống.`, "good");
+    await loadAvatars();
+    if (state.view === "trash") {
+      setTimeout(() => loadTrashContent(), 200);
+    }
+  } else {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
+    toast(r.error || "Không thể xóa vĩnh viễn Avatar.", "bad");
+  }
+}
+
+function confirmPurgeJob(jobId, title) {
+  modal(`<h2>Xóa vĩnh viễn Video render?</h2>
+    <div class="bad-box">Tệp video <b>"${esc(title || jobId)}"</b> trên ổ đĩa sẽ bị <b>xóa vĩnh viễn</b> khỏi máy tính.<br/><br/>
+    Hành động này <b>KHÔNG THỂ HOÀN TÁC</b>!</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="danger" onclick="executePurgeJob('${esc(jobId)}')">Xác nhận Xóa vĩnh viễn</button>
+    </div>`);
+}
+
+async function executePurgeJob(jobId) {
+  closeModal();
+  const card = document.querySelector(`.job[data-job="${jobId}"]`);
+  if (card) {
+    card.style.transition = "all 0.25s ease";
+    card.style.opacity = "0";
+    card.style.transform = "scale(0.92)";
+  }
+  toast("Đang xóa vĩnh viễn video…", "warn");
+  const r = await api(`/api/render/jobs/${jobId}/purge`, { method: "POST" });
+  if (r.ok) {
+    toast("Đã xóa vĩnh viễn video khỏi đĩa cứng.", "good");
+    refreshJobs();
+    if (state.view === "trash") {
+      setTimeout(() => loadTrashContent(), 200);
+    }
+  } else {
+    if (card) { card.style.opacity = "1"; card.style.transform = "none"; }
+    toast(r.error || "Không thể xóa vĩnh viễn video.", "bad");
+  }
+}
+
+function confirmEmptyTrash() {
+  modal(`<h2>Dọn sạch toàn bộ Thùng rác?</h2>
+    <div class="bad-box">Tất cả AI Avatar và video render đang nằm trong Thùng rác sẽ bị <b>xóa hoàn toàn</b> khỏi đĩa cứng để giải phóng dung lượng.<br/><br/>
+    Hành động này <b>KHÔNG THỂ HOÀN TÁC</b>!</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Giữ lại Thùng rác</button>
+      <button type="button" class="danger" onclick="executeEmptyTrash()">Dọn sạch Thùng rác</button>
+    </div>`);
+}
+
+async function executeEmptyTrash() {
+  closeModal();
+  toast("Đang dọn sạch Thùng rác…", "warn");
+  const r = await api("/api/trash/empty", { method: "POST" });
+  if (r.ok) {
+    toast(`Đã dọn sạch: ${r.purged_avatars || 0} Avatar, ${r.purged_jobs || 0} Video.`, "good");
+    await loadAvatars();
+    refreshJobs();
+    if (state.view === "trash") loadTrashContent();
+  } else {
+    toast(r.error || "Lỗi khi dọn Thùng rác.", "bad");
+  }
+}
+
+function confirmRestoreAvatar(aid, dispName) {
+  modal(`<h2>Khôi phục AI Avatar?</h2>
+    <div class="info-box">Avatar <b>"${esc(dispName || aid)}"</b> sẽ được đưa trở lại <b>Thư viện Avatar</b> và sẵn sàng để tạo video.</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="primary" onclick="closeModal(); restoreAvatar('${esc(aid)}')">Xác nhận Khôi phục</button>
+    </div>`);
+}
+
+function confirmRestoreJob(jobId, title) {
+  modal(`<h2>Khôi phục video render?</h2>
+    <div class="info-box">Video <b>"${esc(title || jobId)}"</b> sẽ được đưa trở lại <b>Lịch sử video</b>.</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="primary" onclick="closeModal(); restoreJob('${esc(jobId)}')">Xác nhận Khôi phục</button>
+    </div>`);
+}
+
 async function renderTrash() {
   const el = $("#content");
-  el.innerHTML = `<h1 class="view-title">Thùng rác</h1>
-    <p class="view-sub">Quản lý các AI Avatar và video render đã xóa tạm thời. Bạn có thể khôi phục lại bất kỳ lúc nào.</p>
+  el.innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div>
+        <h1 class="view-title">Thùng rác</h1>
+        <p class="view-sub">Quản lý các AI Avatar và video render đã xóa tạm thời. Bạn có thể khôi phục lại hoặc xóa vĩnh viễn để giải phóng dung lượng đĩa.</p>
+      </div>
+      <button class="danger ghost" id="emptyTrashBtn" onclick="confirmEmptyTrash()" style="display:none;margin-top:6px">🗑️ Dọn sạch Thùng rác</button>
+    </div>
     <div class="filter-chips" id="trashFilters">
       <span class="fchip ${state.trashFilter==='all' || !state.trashFilter ?'active':''}" data-f="all">Tất cả</span>
       <span class="fchip ${state.trashFilter==='avatars'?'active':''}" data-f="avatars">AI Avatar</span>
@@ -3481,6 +3743,10 @@ async function loadTrashContent() {
   const r = await api("/api/trash");
   const avs = r.avatars || [];
   const jobs = r.jobs || [];
+  const emptyBtn = $("#emptyTrashBtn");
+  if (emptyBtn) {
+    emptyBtn.style.display = (avs.length > 0 || jobs.length > 0) ? "inline-block" : "none";
+  }
   const f = state.trashFilter || "all";
 
   const showAvs = (f === "all" || f === "avatars");
@@ -3493,7 +3759,7 @@ async function loadTrashContent() {
       html += `<div class="empty-inline">Không có AI Avatar nào trong Thùng rác.</div>`;
     } else {
       html += `<div class="grid" style="margin-bottom:24px">${avs.map(a => `
-        <div class="avatar-card deleted-card">
+        <div class="avatar-card deleted-card" data-avatar-id="${esc(a.avatar_id)}">
           <div class="ac-thumb">
             <img src="/api/avatars/${esc(a.avatar_id)}/thumbnail" onerror="this.style.opacity=.25" />
           </div>
@@ -3502,8 +3768,9 @@ async function loadTrashContent() {
             <div class="ac-id">${esc(a.avatar_id)}</div>
             <div class="ac-tags"><span class="tag bad">ĐÃ XÓA</span></div>
             <div class="ac-note">Đã xóa lúc: ${a.deleted_at ? new Date(a.deleted_at * 1000).toLocaleString('vi-VN') : '—'}</div>
-            <div class="ac-actions">
-              <button class="primary tiny" onclick="restoreAvatar('${esc(a.avatar_id)}')">Khôi phục</button>
+            <div class="ac-actions" style="display:flex;gap:6px">
+              <button class="primary tiny" onclick="confirmRestoreAvatar('${esc(a.avatar_id)}', '${esc(a.name || a.avatar_id)}')">Khôi phục</button>
+              <button class="danger tiny" onclick="confirmPurgeAvatar('${esc(a.avatar_id)}', '${esc(a.name || a.avatar_id)}')">Xóa vĩnh viễn</button>
             </div>
           </div>
         </div>
@@ -3524,8 +3791,9 @@ async function loadTrashContent() {
             <div class="jsub">ID: <span class="mono">${esc(j.job_id)}</span> · Đã xóa lúc: ${j.deleted_at ? new Date(j.deleted_at * 1000).toLocaleString('vi-VN') : '—'}</div>
             <div class="jbadges"><span class="tag bad">ĐÃ XÓA</span> <span class="tag muted">${statusLabel(j.status)}</span></div>
           </div>
-          <div class="row" style="flex-wrap:nowrap">
-            <button class="primary tiny" onclick="restoreJob('${esc(j.job_id)}')">Khôi phục</button>
+          <div class="row" style="flex-wrap:nowrap;gap:6px">
+            <button class="primary tiny" onclick="confirmRestoreJob('${esc(j.job_id)}', '${esc(j.script_name || j.display_name || j.kind || 'Video')}')">Khôi phục</button>
+            <button class="danger tiny" onclick="confirmPurgeJob('${esc(j.job_id)}', '${esc(j.script_name || j.display_name || j.kind || 'Video')}')">Xóa vĩnh viễn</button>
           </div>
         </div>
       `).join("")}</div>`;
@@ -3780,7 +4048,7 @@ async function checkQuotaManual(silent) {
   const row = $("#quotaRow");
   if (!silent) toast("Đang kiểm tra hạn mức ElevenLabs…");
   try {
-    const q = await api("/api/elevenlabs/quota");
+    const q = await api("/api/elevenlabs/quota?refresh=1");
     if (!row) return;
     if (!q.ok) {
       row.querySelector(".v").textContent = q.error || "không có thông tin";
@@ -3810,8 +4078,16 @@ async function switchProfileToV4(voiceId, lang) {
   }
 }
 
-async function deleteVoiceProfileRow(voiceId, lang) {
-  if (!confirm(`Xóa cấu hình riêng của giọng ${voiceId}? Giọng sẽ dùng model mặc định.`)) return;
+function deleteVoiceProfileRow(voiceId, lang) {
+  modal(`<h2>Xóa cấu hình riêng của giọng?</h2>
+    <div class="warn-box">Cấu hình riêng của giọng <b>${esc(voiceId)}</b> cho ngôn ngữ <b>${esc(lang)}</b> sẽ bị xóa. Giọng sẽ tự động sử dụng model mặc định của hệ thống.</div>
+    <div class="actions" style="margin-top:18px">
+      <button type="button" class="ghost" onclick="closeModal()">Hủy</button>
+      <button type="button" class="danger" onclick="closeModal(); executeDeleteVoiceProfileRow('${esc(voiceId)}', '${esc(lang)}')">Xác nhận Xóa</button>
+    </div>`);
+}
+
+async function executeDeleteVoiceProfileRow(voiceId, lang) {
   const r = await api("/api/elevenlabs/profiles", {
     method: "DELETE",
     body: JSON.stringify({ voice_id: voiceId, language_code: lang })

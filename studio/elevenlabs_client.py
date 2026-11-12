@@ -158,15 +158,33 @@ def model_supports_context(model_id: str) -> bool:
 
 
 _API_KEY = None
+_SESSION: Optional[requests.Session] = None
+_LAST_ACCOUNT_STATUS: Optional[Dict[str, Any]] = None
+_LAST_ACCOUNT_STATUS_TIME: float = 0.0
+
+
+def _get_session() -> requests.Session:
+    global _SESSION
+    if _SESSION is None:
+        _SESSION = requests.Session()
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=1
+        )
+        _SESSION.mount("https://", adapter)
+        _SESSION.mount("http://", adapter)
+    return _SESSION
 
 
 def _key() -> str:
     """Lazily read the API key from .env on first use."""
-    global _API_KEY
+    global _API_KEY, _LAST_ACCOUNT_STATUS
     if _API_KEY is None:
         from . import envutil
         envutil.load_env(force=True)
         _API_KEY = env_str("ELEVENLABS_API_KEY", "")
+        _LAST_ACCOUNT_STATUS = None
     return _API_KEY
 
 
@@ -186,33 +204,52 @@ def is_configured() -> bool:
     return bool(_key())
 
 
-def account_status() -> Dict[str, Any]:
-    """LIVE, uncached account/subscription status from GET /v1/user/subscription.
+def account_status(refresh: bool = False) -> Dict[str, Any]:
+    """Account/subscription status from GET /v1/user/subscription.
 
     Returns only fields ElevenLabs actually returns — never fabricates
-    "remaining characters" or quota numbers. No caching: each call hits the
-    API so a topped-up / changed key is reflected immediately. Never falls
-    back to another key. Used by the Settings view (read-only).
-
-    Returns {ok, tier, status, character_count, character_limit, remaining,
-    reset_unix, reset_date_utc, error?}. `remaining` is computed strictly as
-    character_limit - character_count (the documented binding counter); if the
-    API does not return these fields, remaining is null (not fabricated).
+    "remaining characters" or quota numbers.
+    Features a 30s in-memory cache to prevent redundant international TLS handshakes
+    and API quota throttling. Set refresh=True to bypass cache.
+    Falls back gracefully to the most recent successful response within 10 minutes
+    if a transient network timeout occurs.
     """
+    global _LAST_ACCOUNT_STATUS, _LAST_ACCOUNT_STATUS_TIME
     if not is_configured():
         return {"ok": False, "error": "ElevenLabs API key not configured."}
+
+    now = time.time()
+    if not refresh and _LAST_ACCOUNT_STATUS is not None and (now - _LAST_ACCOUNT_STATUS_TIME < 30.0):
+        res = dict(_LAST_ACCOUNT_STATUS)
+        res["cached"] = True
+        return res
+
     try:
-        r = requests.get("https://api.elevenlabs.io/v1/user/subscription",
-                         headers=_headers(), timeout=30)
+        session = _get_session()
+        r = session.get("https://api.elevenlabs.io/v1/user/subscription",
+                        headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
+        if _LAST_ACCOUNT_STATUS is not None and (now - _LAST_ACCOUNT_STATUS_TIME < 600.0):
+            res = dict(_LAST_ACCOUNT_STATUS)
+            res["cached"] = True
+            res["warning"] = f"Mạng quốc tế chậm ({e}), đang dùng số dư tra cứu gần nhất."
+            return res
         return {"ok": False, "error": f"Network error: {e}"}
+
     if r.status_code != 200:
+        if _LAST_ACCOUNT_STATUS is not None and (now - _LAST_ACCOUNT_STATUS_TIME < 600.0):
+            res = dict(_LAST_ACCOUNT_STATUS)
+            res["cached"] = True
+            res["warning"] = f"ElevenLabs API tạm thời trả về {r.status_code}, đang dùng số dư gần nhất."
+            return res
         return {"ok": False, "error": f"ElevenLabs returned {r.status_code}",
                 "http_status": r.status_code}
+
     try:
         d = r.json()
     except ValueError:
         return {"ok": False, "error": "Unreadable subscription response."}
+
     cc = d.get("character_count")
     cl = d.get("character_limit")
     remaining = (cl - cc) if (isinstance(cc, int) and isinstance(cl, int)) else None
@@ -225,7 +262,8 @@ def account_status() -> Dict[str, Any]:
                 "%Y-%m-%d %H:%M UTC")
         except Exception:
             reset_date = None
-    return {
+
+    result = {
         "ok": True,
         "tier": d.get("tier"),
         "status": d.get("status"),
@@ -235,7 +273,11 @@ def account_status() -> Dict[str, Any]:
         "reset_unix": reset_unix,
         "reset_date_utc": reset_date,
         "can_extend_character_limit": d.get("can_extend_character_limit"),
+        "cached": False,
     }
+    _LAST_ACCOUNT_STATUS = dict(result)
+    _LAST_ACCOUNT_STATUS_TIME = now
+    return result
 
 
 class VoiceError(RuntimeError):
@@ -279,7 +321,7 @@ def check_voice(voice_id: str) -> Dict[str, Any]:
     # 1) Metadata GET (preferred — gives name/labels).
     url = config.ELEVENLABS_VOICE_URL.format(voice_id=vid)
     try:
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = _get_session().get(url, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}", "voice_id": vid}
 
@@ -564,7 +606,7 @@ def get_voice_settings(voice_id: str, refresh: bool = False) -> Dict[str, Any]:
             return {"ok": True, "settings": c, "cached": True}
     url = config.ELEVENLABS_VOICE_SETTINGS_URL.format(voice_id=vid)
     try:
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = _get_session().get(url, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}"}
     if r.status_code != 200:
@@ -595,7 +637,7 @@ def get_models(refresh: bool = False) -> Dict[str, Any]:
         if c is not None:
             return {"ok": True, "models": c, "cached": True}
     try:
-        r = requests.get(config.ELEVENLABS_MODELS_URL, headers=_headers(), timeout=30)
+        r = _get_session().get(config.ELEVENLABS_MODELS_URL, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}"}
     if r.status_code != 200:
@@ -639,7 +681,7 @@ def get_all_voices(refresh: bool = False) -> Dict[str, Any]:
             return {"ok": True, "voices": c, "cached": True}
     try:
         url = getattr(config, "ELEVENLABS_VOICES_URL", "https://api.elevenlabs.io/v1/voices")
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = _get_session().get(url, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}"}
     if r.status_code != 200:
@@ -719,7 +761,7 @@ def get_voice_metadata(voice_id: str, refresh: bool = False) -> Dict[str, Any]:
             return {"ok": True, "metadata": c, "cached": True}
     url = config.ELEVENLABS_VOICE_URL.format(voice_id=vid)
     try:
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = _get_session().get(url, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}"}
     if r.status_code != 200:
@@ -829,7 +871,7 @@ def get_voice_history(voice_id: str, limit: int = 10,
         if c is not None:
             return {"ok": True, "items": c, "cached": True}
     try:
-        r = requests.get(config.ELEVENLABS_HISTORY_URL, headers=_headers(), timeout=30,
+        r = _get_session().get(config.ELEVENLABS_HISTORY_URL, headers=_headers(), timeout=(5.0, 15.0),
                          params={"voice_id": vid, "source": "TTS",
                                  "sort_direction": "desc", "page_size": limit})
     except requests.RequestException as e:
@@ -867,7 +909,7 @@ def get_history_item(history_item_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": "ElevenLabs API key not configured."}
     url = config.ELEVENLABS_HISTORY_ITEM_URL.format(history_item_id=history_item_id)
     try:
-        r = requests.get(url, headers=_headers(), timeout=30)
+        r = _get_session().get(url, headers=_headers(), timeout=(5.0, 15.0))
     except requests.RequestException as e:
         return {"ok": False, "error": f"Network error: {e}"}
     if r.status_code != 200:

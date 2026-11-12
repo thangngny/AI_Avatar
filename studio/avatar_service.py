@@ -168,10 +168,10 @@ def list_avatars(include_deleted: bool = False) -> List[Dict[str, Any]]:
             item["quality"] = row.get("quality")
         # build a compact, honest quality summary for the library card
         from . import avatar_quality as aq
-        qd = None
-        if row and row.get("quality_data"):
+        qd = aq._cached_quality(name)
+        if not qd and ready:
             try:
-                qd = json.loads(row["quality_data"])
+                qd = aq.evaluate_avatar(name, force=False)
             except Exception:
                 qd = None
         qsum = aq.quality_summary_for_list(qd)
@@ -255,6 +255,34 @@ def restore_avatar(avatar_id: str) -> Dict[str, Any]:
     db.restore_avatar(aid)
     db.log_activity("AVATAR_RESTORE", "avatar", aid, {"result": "restored"})
     return {"ok": True, "avatar_id": aid, "restored": True}
+
+
+def purge_avatar(avatar_id: str) -> Dict[str, Any]:
+    """Permanently delete an avatar, deleting its entire directory from disk and DB."""
+    import shutil
+    aid = (avatar_id or "").strip()
+    if not aid:
+        return {"ok": False, "error": "avatar_id is required."}
+
+    has_active, active_jobs = db.has_active_jobs_for_avatar(aid)
+    if has_active:
+        return {
+            "ok": False,
+            "conflict": True,
+            "error": "Không thể xóa vĩnh viễn: Avatar này đang có tác vụ render hoạt động.",
+            "active_jobs": active_jobs,
+        }
+
+    avatar_dir = os.path.join(config.AVATARS_ROOT, aid)
+    if os.path.isdir(avatar_dir):
+        try:
+            shutil.rmtree(avatar_dir)
+        except Exception as e:
+            return {"ok": False, "error": f"Không thể xóa thư mục trên đĩa: {e}"}
+
+    db.hard_delete_avatar(aid)
+    db.log_activity("AVATAR_PURGE", "avatar", aid, {"result": "permanently_deleted"})
+    return {"ok": True, "avatar_id": aid, "purged": True}
 
 
 def avatar_counts() -> Dict[str, int]:
@@ -365,7 +393,8 @@ def analyze_source(video_path: str) -> Dict[str, Any]:
 
     cmd = [_torch_python(), config.VALIDATOR, "--video", video_path, "--json", out_json]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              encoding="utf-8", errors="replace", timeout=180,
                               cwd=config.ROOT)
     except subprocess.TimeoutExpired:
         return {"technical_failure": True, "can_proceed": False,
@@ -553,6 +582,16 @@ class PrepJob:
             self.error = "Preparation timed out (hung process terminated)."
         elif rc != 0:
             self.error = self.error or f"Preparation process exited with code {rc}."
+        else:
+            # Auto-mark ready and evaluate quality immediately upon completion
+            try:
+                d = os.path.join(config.AVATARS_ROOT, self.avatar_id)
+                if _check_ready(d):
+                    db.upsert_avatar(self.avatar_id, ready=1)
+                    from . import avatar_quality as aq
+                    aq.evaluate_avatar(self.avatar_id, force=True)
+            except Exception:
+                pass
         self.done = True
 
 

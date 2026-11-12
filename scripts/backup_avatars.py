@@ -61,7 +61,7 @@ def main():
         if a == "--dest" and i+1 < len(args):
             dest = args[i+1]; break
     if not dest:
-        dest = r"D:\CongThang_AI_Avatar\backup_avatars"
+        dest = r"D:\PhuongPN\backup_avatars"
     manifest_only = "--manifest-only" in args
     os.makedirs(dest, exist_ok=True)
 

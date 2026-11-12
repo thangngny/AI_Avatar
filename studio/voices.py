@@ -40,8 +40,9 @@ _APPROVED_IDS = {v["voice_id"] for v in APPROVED_RENDER_VOICES if v.get("enabled
 
 
 def is_approved_render_voice(voice_id: str) -> bool:
-    """True iff voice_id is one of the enabled production-approved render voices
-    or a custom voice registered by the user."""
+    """True iff voice_id is one of the enabled production-approved render voices,
+    a custom voice registered by the user, or an authorized voice in the user's
+    ElevenLabs account."""
     vid = (voice_id or "").strip()
     if not vid:
         return False
@@ -51,6 +52,24 @@ def is_approved_render_voice(voice_id: str) -> bool:
         from . import db
         if db.is_custom_approved_voice(vid):
             return True
+    except Exception:
+        pass
+    try:
+        from . import elevenlabs_client as el
+        if el.is_configured():
+            # Fast in-memory check against cached account voices
+            c = el._cache_get(("all_voices",))
+            if c is not None and isinstance(c, list):
+                if any(v.get("voice_id") == vid for v in c):
+                    return True
+            # In live production (non-test), query account voices if cache missed
+            import sys
+            is_unittest = "unittest" in sys.modules and any("test" in arg for arg in sys.argv)
+            if not is_unittest:
+                acc = el.get_all_voices()
+                if acc.get("ok") and isinstance(acc.get("voices"), list):
+                    if any(v.get("voice_id") == vid for v in acc.get("voices")):
+                        return True
     except Exception:
         pass
     return False

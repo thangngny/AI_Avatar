@@ -38,10 +38,7 @@ def _resolve_default_torch_python() -> str:
         r"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe",
         os.path.normpath(os.path.join(REPO_ROOT, "..", "runtime_nextgen", "venv", "Scripts", "python.exe")),
         r"C:\Users\phuongpn\runtime_nextgen\venv\Scripts\python.exe",
-        r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
-        r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
         os.path.normpath(os.path.join(REPO_ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),
-        r"C:\CongThang_AI_Avatar_TikTokLive\runtime\venv\Scripts\python.exe",
     ]
     for c in candidates:
         if os.path.isfile(c):

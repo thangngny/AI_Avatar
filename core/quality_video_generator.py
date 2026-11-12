@@ -27,7 +27,7 @@ except ImportError:
 
 
 class QualityVideoGenerator:
-    def __init__(self, output_root: str = r"D:\CongThang_AI_Avatar\v2_renders"):
+    def __init__(self, output_root: str = r"D:\PhuongPN\renders\v2"):
         self.output_root = output_root
         os.makedirs(output_root, exist_ok=True)
         self.gfp_model = None

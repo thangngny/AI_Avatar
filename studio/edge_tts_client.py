@@ -68,21 +68,22 @@ def is_available() -> bool:
 
 def _run_coro(coro):
     """Run an async coroutine in a fresh event loop (the studio controller is
-    synchronous). Mirrors tts/edge.py._run_coro."""
+    synchronous). Safe across worker threads and simultaneous requests."""
+    loop = asyncio.new_event_loop()
     try:
-        return asyncio.run(coro)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(coro)
+    finally:
         try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(coro)
-        finally:
-            try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-            except Exception:
-                pass
-            asyncio.set_event_loop(None)
-            loop.close()
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        try:
+            loop.run_until_complete(loop.shutdown_default_executor())
+        except Exception:
+            pass
+        asyncio.set_event_loop(None)
+        loop.close()
 
 
 async def _fetch_voices() -> List[Dict[str, Any]]:

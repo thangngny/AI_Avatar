@@ -23,7 +23,7 @@ RENDER_SCRIPT = os.path.join(REPO_ROOT, "generate_video_from_script.py")
 
 
 class LongVideoGenerator:
-    def __init__(self, output_root: str = r"D:\CongThang_AI_Avatar\v2_renders"):
+    def __init__(self, output_root: str = r"D:\PhuongPN\renders\v2"):
         self.output_root = output_root
         os.makedirs(output_root, exist_ok=True)
 

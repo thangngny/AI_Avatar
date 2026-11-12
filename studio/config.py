@@ -28,10 +28,10 @@ def _resolve_canonical_interpreter() -> str:
     candidates = [
         os.path.normpath(os.path.join(ROOT, '..', 'runtime_avatar_v2', 'Scripts', 'python.exe')),
         os.path.normpath(os.path.join(ROOT, '..', 'runtime_nextgen', 'venv', 'Scripts', 'python.exe')),
-        r"D:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
-        r"C:\CongThang_AI_Avatar\runtime\venv\Scripts\python.exe",
+        r"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe",
+        r"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe",
         os.path.normpath(os.path.join(ROOT, "..", "runtime", "venv", "Scripts", "python.exe")),
-        r"C:\CongThang_AI_Avatar_TikTokLive\runtime\venv\Scripts\python.exe",
+        r"C:\Users\phuongpn\runtime_avatar_v2\Scripts\python.exe",
     ]
     for c in candidates:
         if os.path.isfile(c):
@@ -60,8 +60,8 @@ def _resolve_renders_dir() -> str:
     if env_dir:
         return env_dir
     candidates = [
-        r"C:\CongThang_AI_Avatar\renders",
-        r"D:\CongThang_AI_Avatar\renders",
+        r"D:\PhuongPN\renders",
+        r"D:\PhuongPN\renders",
         os.path.normpath(os.path.join(ROOT, "..", "renders")),
     ]
     for c in candidates:

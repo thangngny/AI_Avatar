@@ -1,0 +1,7 @@
+Windows Registry Editor Version 5.00
+
+; NVIDIA & Microsoft recommended TDR delay for AI/Deep Learning workstations
+; Prevents Windows WDDM driver watchdog from resetting the GPU during long renders
+[HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\GraphicsDrivers]
+"TdrDelay"=dword:0000003c
+"TdrDdiDelay"=dword:0000003c

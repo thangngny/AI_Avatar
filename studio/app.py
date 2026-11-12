@@ -116,9 +116,9 @@ def _after_request_optimizations(response):
     # HTTP Caching headers
     if request.path.startswith("/api/avatars/") and request.path.endswith("/thumbnail"):
         response.headers["Cache-Control"] = "public, max-age=86400"
-    elif request.path.endswith((".js", ".css", ".png", ".jpg", ".svg", ".woff2")):
+    elif request.path.endswith((".png", ".jpg", ".svg", ".woff2")):
         response.headers["Cache-Control"] = "public, max-age=3600"
-    elif request.path == "/" or request.path.startswith("/api/"):
+    elif request.path.endswith((".js", ".css")) or request.path == "/" or request.path.startswith("/api/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
 
     # Fast Gzip compression for text, json, js, css responses > 400 bytes
@@ -718,6 +718,16 @@ def avatar_restore_route(avatar_id):
     res = avatar_service.restore_avatar(safe_id)
     if not res.get("ok"):
         return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/api/avatars/<avatar_id>/purge", methods=["POST"])
+def avatar_purge_route(avatar_id):
+    safe_id = _sanitize_filename(avatar_id)
+    res = avatar_service.purge_avatar(safe_id)
+    if not res.get("ok"):
+        code = 409 if res.get("conflict") else 400
+        return jsonify(res), code
     return jsonify(res)
 
 
@@ -1357,9 +1367,10 @@ def _enforce_render_voice_allowlist(data: Dict[str, Any]):
         return None  # Edge TTS test path is not an ElevenLabs render
     vid = (data.get("voice_id") or "").strip()
     if not voice_allowlist.is_approved_render_voice(vid):
+        app.logger.warning(f"Voice '{vid}' rejected by render voice allowlist")
         return {"ok": False, "error": "VOICE_NOT_APPROVED_FOR_RENDER",
                 "approved_voice_ids": voice_allowlist.approved_voice_ids(),
-                "detail": "Giọng này không thuộc danh sách production. Không tự thay giọng."}, 403
+                "detail": f"Giọng '{vid}' không thuộc danh sách production hoặc tài khoản ElevenLabs."}, 403
     return None
 
 
@@ -1549,6 +1560,14 @@ def render_validate():
                 "status": "FAIL",
                 "step": 3,
                 "message": "Chưa chọn giọng đọc ở Bước 3.",
+            })
+        elif not voice_allowlist.is_approved_render_voice(voice_id):
+            checklist.append({
+                "id": "voice_model",
+                "title": "3. Giọng đọc",
+                "status": "FAIL",
+                "step": 3,
+                "message": f"Giọng '{voice_id}' không thuộc danh sách production hoặc tài khoản ElevenLabs.",
             })
         else:
             comp = el.check_compatibility(voice_id, model_id, target_language)
@@ -1907,6 +1926,38 @@ def render_restore_route(job_id):
     return jsonify(res)
 
 
+@app.route("/api/render/jobs/<job_id>/purge", methods=["POST"])
+def render_purge_route(job_id):
+    safe_id = _sanitize_filename(job_id)
+    res = render_service.purge_render(safe_id)
+    if not res.get("ok"):
+        return jsonify(res), 400
+    return jsonify(res)
+
+
+@app.route("/api/trash/empty", methods=["POST"])
+def trash_empty_route():
+    del_avs = avatar_service.list_trash_avatars()
+    purged_avs = 0
+    for a in del_avs:
+        r = avatar_service.purge_avatar(a["avatar_id"])
+        if r.get("ok"):
+            purged_avs += 1
+
+    del_jobs = db.list_trash_jobs(limit=500)
+    purged_jobs = 0
+    for j in del_jobs:
+        r = render_service.purge_render(j["job_id"])
+        if r.get("ok"):
+            purged_jobs += 1
+
+    return jsonify({
+        "ok": True,
+        "purged_avatars": purged_avs,
+        "purged_jobs": purged_jobs
+    })
+
+
 @app.route("/api/trash")
 def trash_list_route():
     limit = int(request.args.get("limit", "100"))
@@ -1940,10 +1991,11 @@ def settings_get():
 
 @app.route("/api/elevenlabs/quota")
 def elevenlabs_quota():
-    """LIVE account/subscription status (uncached, non-fabricating). Returns
+    """LIVE account/subscription status. Returns
     the real character_count/character_limit/remaining + reset date, or an
     honest error. Used by the Settings view."""
-    return jsonify(el.account_status())
+    refresh = request.args.get("refresh", "0") in ("1", "true", "yes")
+    return jsonify(el.account_status(refresh=refresh))
 
 
 @app.route("/api/settings/elevenlabs", methods=["GET", "POST"])

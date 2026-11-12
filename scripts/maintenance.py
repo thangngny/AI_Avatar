@@ -103,7 +103,7 @@ def m_verify_avatars():
         print(f"  INCOMPLETE: {a['avatar_id']}")
 
 def m_backup_status():
-    bdir = r"D:\CongThang_AI_Avatar\backups"
+    bdir = r"D:\PhuongPN\backups"
     if not os.path.isdir(bdir):
         print("No backups dir at", bdir); return
     bundles = sorted([d for d in os.listdir(bdir) if d.startswith("studio_backup_")])

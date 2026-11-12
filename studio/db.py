@@ -419,6 +419,18 @@ def restore_job(job_id: str) -> bool:
             conn.close()
 
 
+def hard_delete_job(job_id: str) -> bool:
+    """Permanently delete a render job from SQLite."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
 def list_active_jobs() -> List[Dict[str, Any]]:
     """Jobs that are not in a terminal state (and not soft-deleted)."""
     conn = _connect()
@@ -552,6 +564,18 @@ def restore_avatar(avatar_id: str) -> bool:
                 "UPDATE avatars SET is_deleted = 0, deleted_at = NULL, updated_at = ? WHERE avatar_id = ?",
                 (_now(), avatar_id),
             )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            conn.close()
+
+
+def hard_delete_avatar(avatar_id: str) -> bool:
+    """Permanently delete an avatar row from SQLite."""
+    with _LOCK:
+        conn = _connect()
+        try:
+            cur = conn.execute("DELETE FROM avatars WHERE avatar_id = ?", (avatar_id,))
             conn.commit()
             return cur.rowcount > 0
         finally:

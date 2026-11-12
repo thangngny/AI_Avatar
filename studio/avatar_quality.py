@@ -60,7 +60,7 @@ def render_history(avatar_id: str) -> Dict[str, Any]:
 
     Sources:
       * SQLite jobs table (authoritative, exact avatar_id match) — UI jobs.
-      * external render files under D:\\CongThang_AI_Avatar\\renders whose path
+      * external render files under D:\\PhuongPN\\renders whose path
         contains the avatar_id as a distinct token (boundary regex so close_up
         does NOT match close_up_16_7).
     Read-only; never counts in-progress/failed jobs as production evidence."""
@@ -328,6 +328,14 @@ def resolve_raw_source(avatar_id: str) -> Optional[str]:
         if not os.path.isabs(vp):
             cands.append(os.path.join(config.ROOT, vp))
         cands.append(vp)
+    # database source_video
+    row = db.get_avatar(avatar_id)
+    if row and row.get("source_video"):
+        sv = row["source_video"]
+        if not os.path.isabs(sv):
+            cands.append(os.path.join(config.ROOT, sv))
+        cands.append(sv)
+
     # lineage index
     lineage_path = os.path.join(config.ROOT, "data", "avatar_sources.json")
     if os.path.exists(lineage_path):
@@ -356,7 +364,8 @@ def _run_validator(video_path: str) -> Optional[Dict[str, Any]]:
         pass
     cmd = [_torch_python(), config.VALIDATOR, "--video", video_path, "--json", out_json]
     try:
-        subprocess.run(cmd, capture_output=True, text=True, timeout=180,
+        subprocess.run(cmd, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", timeout=180,
                        cwd=runtime.repo_root())
     except Exception:
         return None
@@ -633,7 +642,14 @@ def _cached_quality(avatar_id: str) -> Optional[Dict[str, Any]]:
     if not qd:
         return None
     try:
-        return json.loads(qd)
+        data = json.loads(qd)
+        # Fix False Cache Hit: Ensure this is a full quality evaluation dictionary,
+        # not the raw temporary wizard upload payload from /api/avatar/prepare.
+        if not isinstance(data, dict):
+            return None
+        if not data.get("quality_status") or not data.get("quality_source"):
+            return None
+        return data
     except Exception:
         return None
 

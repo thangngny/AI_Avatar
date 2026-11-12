@@ -9,7 +9,7 @@ stored as securely as the original .env — see BACKUP_RESTORE.md).
 
 Usage:
     python scripts/backup_studio.py [DEST_DIR]
-Default DEST_DIR = D:\\CongThang_AI_Avatar\\backups
+Default DEST_DIR = D:\\PhuongPN\\backups
 """
 import os, sys, sqlite3, time, shutil, json, hashlib
 
@@ -18,7 +18,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 from studio import config
 
-DEFAULT_DEST = r"D:\CongThang_AI_Avatar\backups"
+DEFAULT_DEST = r"D:\PhuongPN\backups"
 # DEST: first positional arg that isn't a flag/value. (V1.4.1 fix: --retain must
 # not be misread as the destination path.)
 def _dest():

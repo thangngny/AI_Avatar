@@ -277,7 +277,7 @@ def _uuid_from_job_id(job_id: str) -> str:
 def _output_path(kind: str, avatar_id: str, label: str,
                  job_id: Optional[str] = None,
                  custom_name: Optional[str] = None) -> str:
-    """Production render output under D:\\CongThang_AI_Avatar\\renders\\studio\\.
+    """Production render output under D:\\PhuongPN\\renders\\studio\\.
 
     When custom_name is provided (e.g. from user input in wizard), names the file
     cleanly using the user's custom name without chaotic UUID/timestamp prefixes.
@@ -655,6 +655,33 @@ def restore_render(job_id: str) -> Dict[str, Any]:
     return {"ok": True, "job_id": job_id, "restored": True}
 
 
+def purge_render(job_id: str) -> Dict[str, Any]:
+    """Permanently delete a render job and its physical video & log files from disk."""
+    job = db.get_job(job_id)
+    if not job:
+        return {"ok": False, "error": "Không tìm thấy thông tin video."}
+    if job.get("status") in ("preparing_audio", "rendering", "encoding", "verifying"):
+        return {"ok": False, "error": "Không thể xóa tác vụ đang render. Hãy dừng tác vụ trước."}
+
+    out_path = job.get("output_path")
+    if out_path and os.path.isfile(out_path):
+        try:
+            os.remove(out_path)
+        except Exception:
+            pass
+
+    log_path = os.path.join(config.ROOT, "data", "studio_runtime", "logs", f"job_{job_id}.log")
+    if os.path.isfile(log_path):
+        try:
+            os.remove(log_path)
+        except Exception:
+            pass
+
+    db.hard_delete_job(job_id)
+    db.log_activity("RENDER_PURGE", "render", job_id, {"output_path": out_path})
+    return {"ok": True, "job_id": job_id, "purged": True}
+
+
 def _kill_pid(pid: int) -> None:
     try:
         if os.name == "nt":
@@ -781,7 +808,8 @@ def _run_job(job_id: str, gpu_id: int) -> None:
                config.RENDERER,
                "--avatar_id", job["avatar_id"],
                "--audio", cond_path,
-               "--output", out]
+               "--output", out,
+               "--batch_size", "24"]
         if master_path and master_path != cond_path:
             cmd += ["--master-audio", master_path]
         env = os.environ.copy()

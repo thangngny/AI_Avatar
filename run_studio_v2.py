@@ -29,7 +29,7 @@ from quality.qc_gate import QualityControlGate
 
 app = Flask("AI_Avatar_Studio_V2")
 
-V2_RENDERS_DIR = r"D:\CongThang_AI_Avatar\v2_renders"
+V2_RENDERS_DIR = r"D:\PhuongPN\renders\v2"
 os.makedirs(V2_RENDERS_DIR, exist_ok=True)
 
 # State
